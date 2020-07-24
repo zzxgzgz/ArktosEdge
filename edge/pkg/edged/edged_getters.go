@@ -219,8 +219,8 @@ func (e *edged) getPodVolumeSubpathsDir(podUID types.UID) string {
 
 // GetPodByName provides the first pod that matches namespace and name, as well
 // as whether the pod was found.
-func (e *edged) GetPodByName(namespace, name string) (*v1.Pod, bool) {
-	return e.podManager.GetPodByName(namespace, name)
+func (e *edged) GetPodByName(tenant, namespace, name string) (*v1.Pod, bool) {
+	return e.podManager.GetPodByName(tenant, namespace, name)
 }
 
 // GetNode returns the node info for the configured node name of this edged.

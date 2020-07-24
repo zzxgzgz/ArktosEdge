@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,7 +17,7 @@ limitations under the License.
 
 package v1
 
-import "k8s.io/api/core/v1"
+import v1 "k8s.io/api/core/v1"
 
 // The NamespaceExpansion interface allows manually adding extra methods to the NamespaceInterface.
 type NamespaceExpansion interface {
@@ -26,6 +27,6 @@ type NamespaceExpansion interface {
 // Finalize takes the representation of a namespace to update.  Returns the server's representation of the namespace, and an error, if it occurs.
 func (c *namespaces) Finalize(namespace *v1.Namespace) (result *v1.Namespace, err error) {
 	result = &v1.Namespace{}
-	err = c.client.Put().Resource("namespaces").Name(namespace.Name).SubResource("finalize").Body(namespace).Do().Into(result)
+	err = c.client.Put().Resource("namespaces").Tenant(namespace.Tenant).Name(namespace.Name).SubResource("finalize").Body(namespace).Do().Into(result)
 	return
 }

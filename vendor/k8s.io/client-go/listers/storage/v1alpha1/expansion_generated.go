@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,3 +22,7 @@ package v1alpha1
 // VolumeAttachmentListerExpansion allows custom methods to be added to
 // VolumeAttachmentLister.
 type VolumeAttachmentListerExpansion interface{}
+
+// VolumeAttachmentTenantListerExpansion allows custom methods to be added to
+// VolumeAttachmentTenantLister.
+type VolumeAttachmentTenantListerExpansion interface{}

@@ -185,9 +185,6 @@ func (c *containerData) getCgroupPath(cgroups string) (string, error) {
 	if cgroups == "-" {
 		return "/", nil
 	}
-	if strings.HasPrefix(cgroups, "0::") {
-		return cgroups[3:], nil
-	}
 	matches := cgroupPathRegExp.FindSubmatch([]byte(cgroups))
 	if len(matches) != 2 {
 		klog.V(3).Infof("failed to get memory cgroup path from %q", cgroups)

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +18,7 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"k8s.io/kubernetes/pkg/kubelet/runtimeregistry"
 	"net/http"
 	"time"
 
@@ -24,12 +26,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/flowcontrol"
 	internalapi "k8s.io/cri-api/pkg/apis"
 	"k8s.io/kubernetes/pkg/credentialprovider"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
-	"k8s.io/kubernetes/pkg/kubelet/images"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	proberesults "k8s.io/kubernetes/pkg/kubelet/prober/results"
 	"k8s.io/kubernetes/pkg/kubelet/util/logreduction"
@@ -71,41 +71,54 @@ func (f *fakePodStateProvider) IsPodTerminated(uid types.UID) bool {
 	return !found
 }
 
-func newFakeKubeRuntimeManager(runtimeService internalapi.RuntimeService, imageService internalapi.ImageManagerService, machineInfo *cadvisorapi.MachineInfo, osInterface kubecontainer.OSInterface, runtimeHelper kubecontainer.RuntimeHelper, keyring credentialprovider.DockerKeyring) (*kubeGenericRuntimeManager, error) {
+func newFakeKubeRuntimeManager(rs internalapi.RuntimeService, is internalapi.ImageManagerService, machineInfo *cadvisorapi.MachineInfo, osInterface kubecontainer.OSInterface, runtimeHelper kubecontainer.RuntimeHelper, keyring credentialprovider.DockerKeyring) (*kubeGenericRuntimeManager, error) {
 	recorder := &record.FakeRecorder{}
+
+	// TODO: Add new UTs and dynamic set the filed for the runtimeService type
+	//
+	defaultRuntimeServiceName = reservedDefaultRuntimeServiceName
+	imageServices := make(map[string]*runtimeregistry.ImageService)
+	imageServices[defaultRuntimeServiceName] = &runtimeregistry.ImageService{}
+	imageServices[defaultRuntimeServiceName].ServiceApi = is
+	imageServices[defaultRuntimeServiceName].Name = reservedDefaultRuntimeServiceName
+	imageServices[defaultRuntimeServiceName].WorkloadType = runtimeregistry.ContainerWorkloadType
+	imageServices[defaultRuntimeServiceName].IsDefault = true
+
+	runtimeServices := make(map[string]*runtimeregistry.RuntimeService)
+	runtimeServices[defaultRuntimeServiceName] = &runtimeregistry.RuntimeService{}
+	runtimeServices[defaultRuntimeServiceName].ServiceApi = rs
+	runtimeServices[defaultRuntimeServiceName].Name = reservedDefaultRuntimeServiceName
+	runtimeServices[defaultRuntimeServiceName].WorkloadType = runtimeregistry.ContainerWorkloadType
+	runtimeServices[defaultRuntimeServiceName].IsDefault = true
+	runtimeServices[defaultRuntimeServiceName].IsPrimary = true
+
+	rr := runtimeregistry.KubeRuntimeRegistry{RuntimeServices: runtimeServices, ImageServices: imageServices}
+
 	kubeRuntimeManager := &kubeGenericRuntimeManager{
 		recorder:            recorder,
 		cpuCFSQuota:         false,
 		cpuCFSQuotaPeriod:   metav1.Duration{Duration: time.Microsecond * 100},
 		livenessManager:     proberesults.NewManager(),
-		startupManager:      proberesults.NewManager(),
 		containerRefManager: kubecontainer.NewRefManager(),
 		machineInfo:         machineInfo,
 		osInterface:         osInterface,
 		runtimeHelper:       runtimeHelper,
-		runtimeService:      runtimeService,
-		imageService:        imageService,
 		keyring:             keyring,
 		seccompProfileRoot:  fakeSeccompProfileRoot,
 		internalLifecycle:   cm.NewFakeInternalContainerLifecycle(),
 		logReduction:        logreduction.NewLogReduction(identicalErrorDelay),
+		runtimeRegistry:     &rr,
 	}
 
-	typedVersion, err := runtimeService.Version(kubeRuntimeAPIVersion)
+	kubeRuntimeManager.podRuntimeServiceMap = make(map[string]internalapi.RuntimeService)
+
+	typedVersion, err := rs.Version(kubeRuntimeAPIVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	kubeRuntimeManager.containerGC = newContainerGC(runtimeService, newFakePodStateProvider(), kubeRuntimeManager)
+	kubeRuntimeManager.containerGC = newContainerGC(rs, newFakePodStateProvider(), kubeRuntimeManager)
 	kubeRuntimeManager.runtimeName = typedVersion.RuntimeName
-	kubeRuntimeManager.imagePuller = images.NewImageManager(
-		kubecontainer.FilterEventRecorder(recorder),
-		kubeRuntimeManager,
-		flowcontrol.NewBackOff(time.Second, 300*time.Second),
-		false,
-		0, // Disable image pull throttling by setting QPS to 0,
-		0,
-	)
 	kubeRuntimeManager.runner = lifecycle.NewHandlerRunner(
 		&fakeHTTP{},
 		kubeRuntimeManager,

@@ -32,6 +32,7 @@ type ContainerType int
 const (
 	ContainerTypeRaw ContainerType = iota
 	ContainerTypeDocker
+	ContainerTypeRkt
 	ContainerTypeSystemd
 	ContainerTypeCrio
 	ContainerTypeContainerd

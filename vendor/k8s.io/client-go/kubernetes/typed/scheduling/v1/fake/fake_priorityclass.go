@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +45,7 @@ func (c *FakePriorityClasses) Get(name string, options v1.GetOptions) (result *s
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*schedulingv1.PriorityClass), err
 }
 
@@ -68,10 +70,13 @@ func (c *FakePriorityClasses) List(opts v1.ListOptions) (result *schedulingv1.Pr
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested priorityClasses.
-func (c *FakePriorityClasses) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
+// Watch returns a watch.AggregatedWatchInterface that watches the requested priorityClasses.
+func (c *FakePriorityClasses) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
 		InvokesWatch(testing.NewRootWatchAction(priorityclassesResource, opts))
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a priorityClass and creates it.  Returns the server's representation of the priorityClass, and an error, if there is any.
@@ -81,6 +86,7 @@ func (c *FakePriorityClasses) Create(priorityClass *schedulingv1.PriorityClass) 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*schedulingv1.PriorityClass), err
 }
 
@@ -91,6 +97,7 @@ func (c *FakePriorityClasses) Update(priorityClass *schedulingv1.PriorityClass) 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*schedulingv1.PriorityClass), err
 }
 
@@ -103,8 +110,8 @@ func (c *FakePriorityClasses) Delete(name string, options *v1.DeleteOptions) err
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakePriorityClasses) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewRootDeleteCollectionAction(priorityclassesResource, listOptions)
 
+	action := testing.NewRootDeleteCollectionAction(priorityclassesResource, listOptions)
 	_, err := c.Fake.Invokes(action, &schedulingv1.PriorityClassList{})
 	return err
 }
@@ -116,5 +123,6 @@ func (c *FakePriorityClasses) Patch(name string, pt types.PatchType, data []byte
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*schedulingv1.PriorityClass), err
 }

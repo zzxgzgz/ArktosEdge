@@ -92,8 +92,8 @@ func (pm *podManager) GetPodByUID(uid types.UID) (*v1.Pod, bool) {
 	return pod, ok
 }
 
-func (pm *podManager) GetPodByName(namespace, name string) (*v1.Pod, bool) {
-	podFullName := container.BuildPodFullName(name, namespace)
+func (pm *podManager) GetPodByName(tenant, namespace, name string) (*v1.Pod, bool) {
+	podFullName := container.BuildPodFullName(name, namespace, tenant)
 	return pm.GetPodByFullName(podFullName)
 }
 

@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,9 +35,6 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/dockershim/network/metrics"
 	utilsysctl "k8s.io/kubernetes/pkg/util/sysctl"
 	utilexec "k8s.io/utils/exec"
-
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	kubefeatures "k8s.io/kubernetes/pkg/features"
 )
 
 const (
@@ -68,13 +66,13 @@ type NetworkPlugin interface {
 	// SetUpPod is the method called after the infra container of
 	// the pod has been created but before the other containers of the
 	// pod are launched.
-	SetUpPod(namespace string, name string, podSandboxID kubecontainer.ContainerID, annotations, options map[string]string) error
+	SetUpPod(tenant string, namespace string, name string, podSandboxID kubecontainer.ContainerID, annotations, options map[string]string) error
 
 	// TearDownPod is the method called before a pod's infra container will be deleted
-	TearDownPod(namespace string, name string, podSandboxID kubecontainer.ContainerID) error
+	TearDownPod(tenant string, namespace string, name string, podSandboxID kubecontainer.ContainerID) error
 
 	// GetPodNetworkStatus is the method called to obtain the ipv4 or ipv6 addresses of the container
-	GetPodNetworkStatus(namespace string, name string, podSandboxID kubecontainer.ContainerID) (*PodNetworkStatus, error)
+	GetPodNetworkStatus(tenant string, namespace string, name string, podSandboxID kubecontainer.ContainerID) (*PodNetworkStatus, error)
 
 	// Status returns error if the network plugin is in error state
 	Status() error
@@ -92,8 +90,6 @@ type PodNetworkStatus struct {
 	//   - service endpoints are constructed with
 	//   - will be reported in the PodStatus.PodIP field (will override the IP reported by docker)
 	IP net.IP `json:"ip" description:"Primary IP address of the pod"`
-	// IPs is the list of IPs assigned to Pod. IPs[0] == IP. The rest of the list is additional IPs
-	IPs []net.IP `json:"ips" description:"list of additional ips (inclusive of IP) assigned to pod"`
 }
 
 // Host is an interface that plugins can use to access the kubelet.
@@ -161,12 +157,12 @@ func InitNetworkPlugin(plugins []NetworkPlugin, networkPluginName string, host H
 	if chosenPlugin != nil {
 		err := chosenPlugin.Init(host, hairpinMode, nonMasqueradeCIDR, mtu)
 		if err != nil {
-			allErrs = append(allErrs, fmt.Errorf("network plugin %q failed init: %v", networkPluginName, err))
+			allErrs = append(allErrs, fmt.Errorf("Network plugin %q failed init: %v", networkPluginName, err))
 		} else {
 			klog.V(1).Infof("Loaded network plugin %q", networkPluginName)
 		}
 	} else {
-		allErrs = append(allErrs, fmt.Errorf("network plugin %q not found", networkPluginName))
+		allErrs = append(allErrs, fmt.Errorf("Network plugin %q not found.", networkPluginName))
 	}
 
 	return chosenPlugin, utilerrors.NewAggregate(allErrs)
@@ -214,15 +210,15 @@ func (plugin *NoopNetworkPlugin) Capabilities() utilsets.Int {
 	return utilsets.NewInt()
 }
 
-func (plugin *NoopNetworkPlugin) SetUpPod(namespace string, name string, id kubecontainer.ContainerID, annotations, options map[string]string) error {
+func (plugin *NoopNetworkPlugin) SetUpPod(tenant string, namespace string, name string, id kubecontainer.ContainerID, annotations, options map[string]string) error {
 	return nil
 }
 
-func (plugin *NoopNetworkPlugin) TearDownPod(namespace string, name string, id kubecontainer.ContainerID) error {
+func (plugin *NoopNetworkPlugin) TearDownPod(tenant string, namespace string, name string, id kubecontainer.ContainerID) error {
 	return nil
 }
 
-func (plugin *NoopNetworkPlugin) GetPodNetworkStatus(namespace string, name string, id kubecontainer.ContainerID) (*PodNetworkStatus, error) {
+func (plugin *NoopNetworkPlugin) GetPodNetworkStatus(tenant string, namespace string, name string, id kubecontainer.ContainerID) (*PodNetworkStatus, error) {
 	return nil, nil
 }
 
@@ -235,16 +231,16 @@ func getOnePodIP(execer utilexec.Interface, nsenterPath, netnsPath, interfaceNam
 	output, err := execer.Command(nsenterPath, fmt.Sprintf("--net=%s", netnsPath), "-F", "--",
 		"ip", "-o", addrType, "addr", "show", "dev", interfaceName, "scope", "global").CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("unexpected command output %s with error: %v", output, err)
+		return nil, fmt.Errorf("Unexpected command output %s with error: %v", output, err)
 	}
 
 	lines := strings.Split(string(output), "\n")
 	if len(lines) < 1 {
-		return nil, fmt.Errorf("unexpected command output %s", output)
+		return nil, fmt.Errorf("Unexpected command output %s", output)
 	}
 	fields := strings.Fields(lines[0])
 	if len(fields) < 4 {
-		return nil, fmt.Errorf("unexpected address output %s ", lines[0])
+		return nil, fmt.Errorf("Unexpected address output %s ", lines[0])
 	}
 	ip, _, err := net.ParseCIDR(fields[3])
 	if err != nil {
@@ -255,39 +251,17 @@ func getOnePodIP(execer utilexec.Interface, nsenterPath, netnsPath, interfaceNam
 }
 
 // GetPodIP gets the IP of the pod by inspecting the network info inside the pod's network namespace.
-// TODO (khenidak). The "primary ip" in dual stack world does not really exist. For now
-// we are defaulting to v4 as primary
-func GetPodIPs(execer utilexec.Interface, nsenterPath, netnsPath, interfaceName string) ([]net.IP, error) {
-	if !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.IPv6DualStack) {
-		ip, err := getOnePodIP(execer, nsenterPath, netnsPath, interfaceName, "-4")
-		if err != nil {
-			// Fall back to IPv6 address if no IPv4 address is present
-			ip, err = getOnePodIP(execer, nsenterPath, netnsPath, interfaceName, "-6")
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		return []net.IP{ip}, nil
+func GetPodIP(execer utilexec.Interface, nsenterPath, netnsPath, interfaceName string) (net.IP, error) {
+	ip, err := getOnePodIP(execer, nsenterPath, netnsPath, interfaceName, "-4")
+	if err != nil {
+		// Fall back to IPv6 address if no IPv4 address is present
+		ip, err = getOnePodIP(execer, nsenterPath, netnsPath, interfaceName, "-6")
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	var (
-		list []net.IP
-		errs []error
-	)
-	for _, addrType := range []string{"-4", "-6"} {
-		if ip, err := getOnePodIP(execer, nsenterPath, netnsPath, interfaceName, addrType); err == nil {
-			list = append(list, ip)
-		} else {
-			errs = append(errs, err)
-		}
-	}
-
-	if len(list) == 0 {
-		return nil, utilerrors.NewAggregate(errs)
-	}
-	return list, nil
-
+	return ip, nil
 }
 
 type NoopPortMappingGetter struct{}
@@ -384,43 +358,43 @@ func recordOperation(operation string, start time.Time) {
 	metrics.DeprecatedNetworkPluginOperationsLatency.WithLabelValues(operation).Observe(metrics.SinceInMicroseconds(start))
 }
 
-func (pm *PluginManager) GetPodNetworkStatus(podNamespace, podName string, id kubecontainer.ContainerID) (*PodNetworkStatus, error) {
+func (pm *PluginManager) GetPodNetworkStatus(podTenant, podNamespace, podName string, id kubecontainer.ContainerID) (*PodNetworkStatus, error) {
 	defer recordOperation("get_pod_network_status", time.Now())
-	fullPodName := kubecontainer.BuildPodFullName(podName, podNamespace)
+	fullPodName := kubecontainer.BuildPodFullName(podName, podNamespace, podTenant)
 	pm.podLock(fullPodName).Lock()
 	defer pm.podUnlock(fullPodName)
 
-	netStatus, err := pm.plugin.GetPodNetworkStatus(podNamespace, podName, id)
+	netStatus, err := pm.plugin.GetPodNetworkStatus(podTenant, podNamespace, podName, id)
 	if err != nil {
-		return nil, fmt.Errorf("networkPlugin %s failed on the status hook for pod %q: %v", pm.plugin.Name(), fullPodName, err)
+		return nil, fmt.Errorf("NetworkPlugin %s failed on the status hook for pod %q: %v", pm.plugin.Name(), fullPodName, err)
 	}
 
 	return netStatus, nil
 }
 
-func (pm *PluginManager) SetUpPod(podNamespace, podName string, id kubecontainer.ContainerID, annotations, options map[string]string) error {
+func (pm *PluginManager) SetUpPod(podTenant, podNamespace, podName string, id kubecontainer.ContainerID, annotations, options map[string]string) error {
 	defer recordOperation("set_up_pod", time.Now())
-	fullPodName := kubecontainer.BuildPodFullName(podName, podNamespace)
+	fullPodName := kubecontainer.BuildPodFullName(podName, podNamespace, podTenant)
 	pm.podLock(fullPodName).Lock()
 	defer pm.podUnlock(fullPodName)
 
 	klog.V(3).Infof("Calling network plugin %s to set up pod %q", pm.plugin.Name(), fullPodName)
-	if err := pm.plugin.SetUpPod(podNamespace, podName, id, annotations, options); err != nil {
-		return fmt.Errorf("networkPlugin %s failed to set up pod %q network: %v", pm.plugin.Name(), fullPodName, err)
+	if err := pm.plugin.SetUpPod(podTenant, podNamespace, podName, id, annotations, options); err != nil {
+		return fmt.Errorf("NetworkPlugin %s failed to set up pod %q network: %v", pm.plugin.Name(), fullPodName, err)
 	}
 
 	return nil
 }
 
-func (pm *PluginManager) TearDownPod(podNamespace, podName string, id kubecontainer.ContainerID) error {
+func (pm *PluginManager) TearDownPod(podTenant, podNamespace, podName string, id kubecontainer.ContainerID) error {
 	defer recordOperation("tear_down_pod", time.Now())
-	fullPodName := kubecontainer.BuildPodFullName(podName, podNamespace)
+	fullPodName := kubecontainer.BuildPodFullName(podName, podNamespace, podTenant)
 	pm.podLock(fullPodName).Lock()
 	defer pm.podUnlock(fullPodName)
 
 	klog.V(3).Infof("Calling network plugin %s to tear down pod %q", pm.plugin.Name(), fullPodName)
-	if err := pm.plugin.TearDownPod(podNamespace, podName, id); err != nil {
-		return fmt.Errorf("networkPlugin %s failed to teardown pod %q network: %v", pm.plugin.Name(), fullPodName, err)
+	if err := pm.plugin.TearDownPod(podTenant, podNamespace, podName, id); err != nil {
+		return fmt.Errorf("NetworkPlugin %s failed to teardown pod %q network: %v", pm.plugin.Name(), fullPodName, err)
 	}
 
 	return nil

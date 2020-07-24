@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +45,7 @@ func (c *FakeCSINodes) Get(name string, options v1.GetOptions) (result *v1beta1.
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSINode), err
 }
 
@@ -68,10 +70,13 @@ func (c *FakeCSINodes) List(opts v1.ListOptions) (result *v1beta1.CSINodeList, e
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested cSINodes.
-func (c *FakeCSINodes) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
+// Watch returns a watch.AggregatedWatchInterface that watches the requested cSINodes.
+func (c *FakeCSINodes) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
 		InvokesWatch(testing.NewRootWatchAction(csinodesResource, opts))
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a cSINode and creates it.  Returns the server's representation of the cSINode, and an error, if there is any.
@@ -81,6 +86,7 @@ func (c *FakeCSINodes) Create(cSINode *v1beta1.CSINode) (result *v1beta1.CSINode
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSINode), err
 }
 
@@ -91,6 +97,7 @@ func (c *FakeCSINodes) Update(cSINode *v1beta1.CSINode) (result *v1beta1.CSINode
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSINode), err
 }
 
@@ -103,8 +110,8 @@ func (c *FakeCSINodes) Delete(name string, options *v1.DeleteOptions) error {
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeCSINodes) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewRootDeleteCollectionAction(csinodesResource, listOptions)
 
+	action := testing.NewRootDeleteCollectionAction(csinodesResource, listOptions)
 	_, err := c.Fake.Invokes(action, &v1beta1.CSINodeList{})
 	return err
 }
@@ -116,5 +123,6 @@ func (c *FakeCSINodes) Patch(name string, pt types.PatchType, data []byte, subre
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSINode), err
 }

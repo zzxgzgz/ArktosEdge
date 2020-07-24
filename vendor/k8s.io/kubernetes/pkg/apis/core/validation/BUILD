@@ -7,6 +7,7 @@ load(
 go_library(
     name = "go_default_library",
     srcs = [
+        "actions.go",
         "conditional_validation.go",
         "doc.go",
         "events.go",
@@ -18,6 +19,7 @@ go_library(
         "//pkg/api/service:go_default_library",
         "//pkg/apis/core:go_default_library",
         "//pkg/apis/core/helper:go_default_library",
+        "//pkg/apis/core/helper/qos:go_default_library",
         "//pkg/apis/core/pods:go_default_library",
         "//pkg/apis/core/v1:go_default_library",
         "//pkg/apis/core/v1/helper:go_default_library",
@@ -41,7 +43,6 @@ go_library(
         "//staging/src/k8s.io/apimachinery/pkg/util/validation/field:go_default_library",
         "//staging/src/k8s.io/apiserver/pkg/util/feature:go_default_library",
         "//vendor/k8s.io/klog:go_default_library",
-        "//vendor/k8s.io/utils/net:go_default_library",
     ],
 )
 

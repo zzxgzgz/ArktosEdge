@@ -19,12 +19,13 @@ package metrics
 import (
 	"sync"
 
-	"k8s.io/component-base/metrics"
-	"k8s.io/component-base/metrics/legacyregistry"
+	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/kubelet/pluginmanager/cache"
 )
 
 const (
+	pluginNameNotAvailable = "N/A"
 	// Metric keys for Plugin Manager.
 	pluginManagerTotalPlugins = "plugin_manager_total_plugins"
 )
@@ -32,13 +33,11 @@ const (
 var (
 	registerMetrics sync.Once
 
-	totalPluginsDesc = metrics.NewDesc(
+	totalPluginsDesc = prometheus.NewDesc(
 		pluginManagerTotalPlugins,
 		"Number of plugins in Plugin Manager",
 		[]string{"socket_path", "state"},
 		nil,
-		metrics.ALPHA,
-		"",
 	)
 )
 
@@ -57,33 +56,35 @@ func (pc pluginCount) add(state, pluginName string) {
 // Register registers Plugin Manager metrics.
 func Register(asw cache.ActualStateOfWorld, dsw cache.DesiredStateOfWorld) {
 	registerMetrics.Do(func() {
-		legacyregistry.CustomMustRegister(&totalPluginsCollector{asw: asw, dsw: dsw})
+		prometheus.MustRegister(&totalPluginsCollector{asw, dsw})
 	})
 }
 
 type totalPluginsCollector struct {
-	metrics.BaseStableCollector
-
 	asw cache.ActualStateOfWorld
 	dsw cache.DesiredStateOfWorld
 }
 
-var _ metrics.StableCollector = &totalPluginsCollector{}
+var _ prometheus.Collector = &totalPluginsCollector{}
 
-// DescribeWithStability implements the metrics.StableCollector interface.
-func (c *totalPluginsCollector) DescribeWithStability(ch chan<- *metrics.Desc) {
+// Describe implements the prometheus.Collector interface.
+func (c *totalPluginsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- totalPluginsDesc
 }
 
-// CollectWithStability implements the metrics.StableCollector interface.
-func (c *totalPluginsCollector) CollectWithStability(ch chan<- metrics.Metric) {
+// Collect implements the prometheus.Collector interface.
+func (c *totalPluginsCollector) Collect(ch chan<- prometheus.Metric) {
 	for stateName, pluginCount := range c.getPluginCount() {
 		for socketPath, count := range pluginCount {
-			ch <- metrics.NewLazyConstMetric(totalPluginsDesc,
-				metrics.GaugeValue,
+			metric, err := prometheus.NewConstMetric(totalPluginsDesc,
+				prometheus.GaugeValue,
 				float64(count),
 				socketPath,
 				stateName)
+			if err != nil {
+				klog.Warningf("Failed to create metric : %v", err)
+			}
+			ch <- metric
 		}
 	}
 }

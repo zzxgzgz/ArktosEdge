@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import (
 // A group's client should implement this interface.
 type SelfSubjectAccessReviewsGetter interface {
 	SelfSubjectAccessReviews() SelfSubjectAccessReviewInterface
+	SelfSubjectAccessReviewsWithMultiTenancy(tenant string) SelfSubjectAccessReviewInterface
 }
 
 // SelfSubjectAccessReviewInterface has methods to work with SelfSubjectAccessReview resources.
@@ -35,12 +37,20 @@ type SelfSubjectAccessReviewInterface interface {
 
 // selfSubjectAccessReviews implements SelfSubjectAccessReviewInterface
 type selfSubjectAccessReviews struct {
-	client rest.Interface
+	client  rest.Interface
+	clients []rest.Interface
+	te      string
 }
 
 // newSelfSubjectAccessReviews returns a SelfSubjectAccessReviews
 func newSelfSubjectAccessReviews(c *AuthorizationV1Client) *selfSubjectAccessReviews {
+	return newSelfSubjectAccessReviewsWithMultiTenancy(c, "system")
+}
+
+func newSelfSubjectAccessReviewsWithMultiTenancy(c *AuthorizationV1Client, tenant string) *selfSubjectAccessReviews {
 	return &selfSubjectAccessReviews{
-		client: c.RESTClient(),
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		te:      tenant,
 	}
 }

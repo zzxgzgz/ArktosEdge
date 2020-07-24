@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,9 +20,12 @@ package types
 import (
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	kubeapi "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/scheduling"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 const (
@@ -29,6 +33,7 @@ const (
 	ConfigMirrorAnnotationKey    = v1.MirrorPodAnnotationKey
 	ConfigFirstSeenAnnotationKey = "kubernetes.io/config.seen"
 	ConfigHashAnnotationKey      = "kubernetes.io/config.hash"
+	CriticalPodAnnotationKey     = "scheduler.alpha.kubernetes.io/critical-pod"
 )
 
 // PodOperation defines what changes will be made on a pod configuration.
@@ -50,6 +55,8 @@ const (
 	RECONCILE
 	// Pods with the given ids have been restored from a checkpoint.
 	RESTORE
+	// Handle Action
+	ACTION
 
 	// These constants identify the sources of pods
 	// Updates from a file
@@ -74,9 +81,10 @@ const (
 // functionally similar, this helps our unit tests properly check that the correct PodUpdates
 // are generated.
 type PodUpdate struct {
-	Pods   []*v1.Pod
-	Op     PodOperation
-	Source string
+	Pods    []*v1.Pod
+	Op      PodOperation
+	Source  string
+	Actions []*v1.Action
 }
 
 // Gets all validated sources from the specified sources.
@@ -88,8 +96,9 @@ func GetValidatedSources(sources []string) ([]string, error) {
 			return []string{FileSource, HTTPSource, ApiserverSource}, nil
 		case FileSource, HTTPSource, ApiserverSource:
 			validated = append(validated, source)
+			break
 		case "":
-			// Skip
+			break
 		default:
 			return []string{}, fmt.Errorf("unknown pod source %q", source)
 		}
@@ -120,6 +129,8 @@ const (
 	// SyncPodKill is when the pod is killed based on a trigger internal to the kubelet for eviction.
 	// If a SyncPodKill request is made to pod workers, the request is never dropped, and will always be processed.
 	SyncPodKill
+	// SyncPodAction is when a action has been requested for a pod
+	SyncPodAction
 )
 
 func (sp SyncPodType) String() string {
@@ -132,33 +143,26 @@ func (sp SyncPodType) String() string {
 		return "sync"
 	case SyncPodKill:
 		return "kill"
+	case SyncPodAction:
+		return "action"
 	default:
 		return "unknown"
 	}
 }
 
-// IsMirrorPod returns true if the passed Pod is a Mirror Pod.
-func IsMirrorPod(pod *v1.Pod) bool {
-	_, ok := pod.Annotations[ConfigMirrorAnnotationKey]
-	return ok
-}
-
-// IsStaticPod returns true if the pod is a static pod.
-func IsStaticPod(pod *v1.Pod) bool {
-	source, err := GetPodSource(pod)
-	return err == nil && source != ApiserverSource
-}
-
-// IsCriticalPod returns true if pod's priority is greater than or equal to SystemCriticalPriority.
+// IsCriticalPod returns true if the pod bears the critical pod annotation key or if pod's priority is greater than
+// or equal to SystemCriticalPriority. Both the default scheduler and the kubelet use this function
+// to make admission and scheduling decisions.
 func IsCriticalPod(pod *v1.Pod) bool {
-	if IsStaticPod(pod) {
-		return true
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {
+		if pod.Spec.Priority != nil && IsCriticalPodBasedOnPriority(*pod.Spec.Priority) {
+			return true
+		}
 	}
-	if IsMirrorPod(pod) {
-		return true
-	}
-	if pod.Spec.Priority != nil && IsCriticalPodBasedOnPriority(*pod.Spec.Priority) {
-		return true
+	if utilfeature.DefaultFeatureGate.Enabled(features.ExperimentalCriticalPodAnnotation) {
+		if IsCritical(pod.Namespace, pod.Annotations) {
+			return true
+		}
 	}
 	return false
 }
@@ -169,15 +173,35 @@ func Preemptable(preemptor, preemptee *v1.Pod) bool {
 	if IsCriticalPod(preemptor) && !IsCriticalPod(preemptee) {
 		return true
 	}
-	if (preemptor != nil && preemptor.Spec.Priority != nil) &&
-		(preemptee != nil && preemptee.Spec.Priority != nil) {
-		return *(preemptor.Spec.Priority) > *(preemptee.Spec.Priority)
+	if utilfeature.DefaultFeatureGate.Enabled(features.PodPriority) {
+		if (preemptor != nil && preemptor.Spec.Priority != nil) &&
+			(preemptee != nil && preemptee.Spec.Priority != nil) {
+			return *(preemptor.Spec.Priority) > *(preemptee.Spec.Priority)
+		}
 	}
 
 	return false
 }
 
+// IsCritical returns true if parameters bear the critical pod annotation
+// key. The DaemonSetController use this key directly to make scheduling decisions.
+// TODO: @ravig - Deprecated. Remove this when we move to resolving critical pods based on priorityClassName.
+func IsCritical(ns string, annotations map[string]string) bool {
+	// Critical pods are restricted to "kube-system" namespace as of now.
+	if ns != kubeapi.NamespaceSystem {
+		return false
+	}
+	val, ok := annotations[CriticalPodAnnotationKey]
+	if ok && val == "" {
+		return true
+	}
+	return false
+}
+
 // IsCriticalPodBasedOnPriority checks if the given pod is a critical pod based on priority resolved from pod Spec.
 func IsCriticalPodBasedOnPriority(priority int32) bool {
-	return priority >= scheduling.SystemCriticalPriority
+	if priority >= scheduling.SystemCriticalPriority {
+		return true
+	}
+	return false
 }

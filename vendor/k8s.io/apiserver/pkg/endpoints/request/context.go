@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,6 +40,9 @@ const (
 
 	// audiencesKey is the context key for request audiences.
 	audiencesKey
+
+	// tenantKey is the context key for the request tenant.
+	tenantKey
 )
 
 // NewContext instantiates a base context object for request flows.
@@ -46,9 +50,11 @@ func NewContext() context.Context {
 	return context.TODO()
 }
 
-// NewDefaultContext instantiates a base context object for request flows in the default namespace
+// NewDefaultContext instantiates a base context object for request flows in the default tenant/namespace
 func NewDefaultContext() context.Context {
-	return WithNamespace(NewContext(), metav1.NamespaceDefault)
+	ctx := WithNamespace(NewContext(), metav1.NamespaceDefault)
+	ctx = WithTenant(ctx, metav1.TenantSystem)
+	return ctx
 }
 
 // WithValue returns a copy of parent in which the value associated with key is val.
@@ -56,9 +62,38 @@ func WithValue(parent context.Context, key interface{}, val interface{}) context
 	return context.WithValue(parent, key, val)
 }
 
+// WithTenant returns a copy of parent in which the tenant value is set
+func WithTenant(parent context.Context, tenant string) context.Context {
+	return WithValue(parent, tenantKey, tenant)
+}
+
+// TenantFrom returns the value of the tenant key on the ctx
+func TenantFrom(ctx context.Context) (string, bool) {
+	// for backward compatibility with code before multi-tenancy, we set the tenant value as "default" if tenantKey is not set
+	if ctx.Value(tenantKey) == nil {
+		return metav1.TenantSystem, true
+	}
+	tenant, ok := ctx.Value(tenantKey).(string)
+	return tenant, ok
+}
+
+// TenantValue returns the value of the tenant key on the ctx, or the empty string if none
+func TenantValue(ctx context.Context) string {
+	tenant, _ := TenantFrom(ctx)
+	return tenant
+}
+
 // WithNamespace returns a copy of parent in which the namespace value is set
 func WithNamespace(parent context.Context, namespace string) context.Context {
 	return WithValue(parent, namespaceKey, namespace)
+}
+
+// WithTenantAndNamespace returns a copy of parent in which the tenant and namespace value are set
+func WithTenantAndNamespace(parent context.Context, tenant, namespace string) context.Context {
+	return WithValue(
+		WithValue(parent, namespaceKey, namespace),
+		tenantKey,
+		tenant)
 }
 
 // NamespaceFrom returns the value of the namespace key on the ctx

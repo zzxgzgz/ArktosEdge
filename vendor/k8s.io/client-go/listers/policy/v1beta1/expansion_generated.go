@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,3 +30,7 @@ type EvictionNamespaceListerExpansion interface{}
 // PodSecurityPolicyListerExpansion allows custom methods to be added to
 // PodSecurityPolicyLister.
 type PodSecurityPolicyListerExpansion interface{}
+
+// PodSecurityPolicyTenantListerExpansion allows custom methods to be added to
+// PodSecurityPolicyTenantLister.
+type PodSecurityPolicyTenantListerExpansion interface{}

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,6 +29,7 @@ type EvictionExpansion interface {
 func (c *evictions) Evict(eviction *policy.Eviction) error {
 	return c.client.Post().
 		AbsPath("/api/v1").
+		Tenant(eviction.Tenant).
 		Namespace(eviction.Namespace).
 		Resource("pods").
 		Name(eviction.Name).

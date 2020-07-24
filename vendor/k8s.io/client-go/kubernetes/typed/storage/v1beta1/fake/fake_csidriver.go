@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +45,7 @@ func (c *FakeCSIDrivers) Get(name string, options v1.GetOptions) (result *v1beta
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSIDriver), err
 }
 
@@ -68,10 +70,13 @@ func (c *FakeCSIDrivers) List(opts v1.ListOptions) (result *v1beta1.CSIDriverLis
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested cSIDrivers.
-func (c *FakeCSIDrivers) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
+// Watch returns a watch.AggregatedWatchInterface that watches the requested cSIDrivers.
+func (c *FakeCSIDrivers) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
 		InvokesWatch(testing.NewRootWatchAction(csidriversResource, opts))
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a cSIDriver and creates it.  Returns the server's representation of the cSIDriver, and an error, if there is any.
@@ -81,6 +86,7 @@ func (c *FakeCSIDrivers) Create(cSIDriver *v1beta1.CSIDriver) (result *v1beta1.C
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSIDriver), err
 }
 
@@ -91,6 +97,7 @@ func (c *FakeCSIDrivers) Update(cSIDriver *v1beta1.CSIDriver) (result *v1beta1.C
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSIDriver), err
 }
 
@@ -103,8 +110,8 @@ func (c *FakeCSIDrivers) Delete(name string, options *v1.DeleteOptions) error {
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeCSIDrivers) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewRootDeleteCollectionAction(csidriversResource, listOptions)
 
+	action := testing.NewRootDeleteCollectionAction(csidriversResource, listOptions)
 	_, err := c.Fake.Invokes(action, &v1beta1.CSIDriverList{})
 	return err
 }
@@ -116,5 +123,6 @@ func (c *FakeCSIDrivers) Patch(name string, pt types.PatchType, data []byte, sub
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.CSIDriver), err
 }

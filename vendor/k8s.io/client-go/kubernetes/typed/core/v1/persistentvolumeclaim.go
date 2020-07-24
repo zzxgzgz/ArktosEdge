@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,20 +20,24 @@ limitations under the License.
 package v1
 
 import (
+	strings "strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 // PersistentVolumeClaimsGetter has a method to return a PersistentVolumeClaimInterface.
 // A group's client should implement this interface.
 type PersistentVolumeClaimsGetter interface {
 	PersistentVolumeClaims(namespace string) PersistentVolumeClaimInterface
+	PersistentVolumeClaimsWithMultiTenancy(namespace string, tenant string) PersistentVolumeClaimInterface
 }
 
 // PersistentVolumeClaimInterface has methods to work with PersistentVolumeClaim resources.
@@ -44,22 +49,30 @@ type PersistentVolumeClaimInterface interface {
 	DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error
 	Get(name string, options metav1.GetOptions) (*v1.PersistentVolumeClaim, error)
 	List(opts metav1.ListOptions) (*v1.PersistentVolumeClaimList, error)
-	Watch(opts metav1.ListOptions) (watch.Interface, error)
+	Watch(opts metav1.ListOptions) watch.AggregatedWatchInterface
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.PersistentVolumeClaim, err error)
 	PersistentVolumeClaimExpansion
 }
 
 // persistentVolumeClaims implements PersistentVolumeClaimInterface
 type persistentVolumeClaims struct {
-	client rest.Interface
-	ns     string
+	client  rest.Interface
+	clients []rest.Interface
+	ns      string
+	te      string
 }
 
 // newPersistentVolumeClaims returns a PersistentVolumeClaims
 func newPersistentVolumeClaims(c *CoreV1Client, namespace string) *persistentVolumeClaims {
+	return newPersistentVolumeClaimsWithMultiTenancy(c, namespace, "system")
+}
+
+func newPersistentVolumeClaimsWithMultiTenancy(c *CoreV1Client, namespace string, tenant string) *persistentVolumeClaims {
 	return &persistentVolumeClaims{
-		client: c.RESTClient(),
-		ns:     namespace,
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		ns:      namespace,
+		te:      tenant,
 	}
 }
 
@@ -67,12 +80,14 @@ func newPersistentVolumeClaims(c *CoreV1Client, namespace string) *persistentVol
 func (c *persistentVolumeClaims) Get(name string, options metav1.GetOptions) (result *v1.PersistentVolumeClaim, err error) {
 	result = &v1.PersistentVolumeClaim{}
 	err = c.client.Get().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -84,52 +99,113 @@ func (c *persistentVolumeClaims) List(opts metav1.ListOptions) (result *v1.Persi
 	}
 	result = &v1.PersistentVolumeClaimList{}
 	err = c.client.Get().
-		Namespace(c.ns).
+		Tenant(c.te).Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
 		Do().
 		Into(result)
+	if err == nil {
+		return
+	}
+
+	if !(errors.IsForbidden(err) && strings.Contains(err.Error(), "no relationship found between node")) {
+		return
+	}
+
+	// Found api server that works with this list, keep the client
+	for _, client := range c.clients {
+		if client == c.client {
+			continue
+		}
+
+		err = client.Get().
+			Tenant(c.te).Namespace(c.ns).
+			Resource("persistentvolumeclaims").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Do().
+			Into(result)
+
+		if err == nil {
+			c.client = client
+			return
+		}
+
+		if err != nil && errors.IsForbidden(err) &&
+			strings.Contains(err.Error(), "no relationship found between node") {
+			klog.V(6).Infof("Skip error %v in list", err)
+			continue
+		}
+	}
+
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested persistentVolumeClaims.
-func (c *persistentVolumeClaims) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+func (c *persistentVolumeClaims) Watch(opts metav1.ListOptions) watch.AggregatedWatchInterface {
 	var timeout time.Duration
 	if opts.TimeoutSeconds != nil {
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("persistentvolumeclaims").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch()
+	aggWatch := watch.NewAggregatedWatcher()
+	for _, client := range c.clients {
+		watcher, err := client.Get().
+			Tenant(c.te).
+			Namespace(c.ns).
+			Resource("persistentvolumeclaims").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Watch()
+		if err != nil && opts.AllowPartialWatch && errors.IsForbidden(err) {
+			// watch error was not returned properly in error message. Skip when partial watch is allowed
+			klog.V(6).Infof("Watch error for partial watch %v. options [%+v]", err, opts)
+			continue
+		}
+		aggWatch.AddWatchInterface(watcher, err)
+	}
+	return aggWatch
 }
 
 // Create takes the representation of a persistentVolumeClaim and creates it.  Returns the server's representation of the persistentVolumeClaim, and an error, if there is any.
 func (c *persistentVolumeClaims) Create(persistentVolumeClaim *v1.PersistentVolumeClaim) (result *v1.PersistentVolumeClaim, err error) {
 	result = &v1.PersistentVolumeClaim{}
+
+	objectTenant := persistentVolumeClaim.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Post().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		Body(persistentVolumeClaim).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Update takes the representation of a persistentVolumeClaim and updates it. Returns the server's representation of the persistentVolumeClaim, and an error, if there is any.
 func (c *persistentVolumeClaims) Update(persistentVolumeClaim *v1.PersistentVolumeClaim) (result *v1.PersistentVolumeClaim, err error) {
 	result = &v1.PersistentVolumeClaim{}
+
+	objectTenant := persistentVolumeClaim.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		Name(persistentVolumeClaim.Name).
 		Body(persistentVolumeClaim).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -138,7 +214,14 @@ func (c *persistentVolumeClaims) Update(persistentVolumeClaim *v1.PersistentVolu
 
 func (c *persistentVolumeClaims) UpdateStatus(persistentVolumeClaim *v1.PersistentVolumeClaim) (result *v1.PersistentVolumeClaim, err error) {
 	result = &v1.PersistentVolumeClaim{}
+
+	objectTenant := persistentVolumeClaim.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		Name(persistentVolumeClaim.Name).
@@ -146,12 +229,14 @@ func (c *persistentVolumeClaims) UpdateStatus(persistentVolumeClaim *v1.Persiste
 		Body(persistentVolumeClaim).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Delete takes name of the persistentVolumeClaim and deletes it. Returns an error if one occurs.
 func (c *persistentVolumeClaims) Delete(name string, options *metav1.DeleteOptions) error {
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		Name(name).
@@ -167,6 +252,7 @@ func (c *persistentVolumeClaims) DeleteCollection(options *metav1.DeleteOptions,
 		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
 	}
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
@@ -180,6 +266,7 @@ func (c *persistentVolumeClaims) DeleteCollection(options *metav1.DeleteOptions,
 func (c *persistentVolumeClaims) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.PersistentVolumeClaim, err error) {
 	result = &v1.PersistentVolumeClaim{}
 	err = c.client.Patch(pt).
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("persistentvolumeclaims").
 		SubResource(subresources...).
@@ -187,5 +274,6 @@ func (c *persistentVolumeClaims) Patch(name string, pt types.PatchType, data []b
 		Body(data).
 		Do().
 		Into(result)
+
 	return
 }

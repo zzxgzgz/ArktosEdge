@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -148,6 +149,33 @@ func (in instrumentedRuntimeService) ReopenContainerLog(containerID string) erro
 	defer recordOperation(operation, time.Now())
 
 	err := in.service.ReopenContainerLog(containerID)
+	recordError(operation, err)
+	return err
+}
+
+func (in instrumentedRuntimeService) RebootVM(vmID string) error {
+	const operation = "RebootVM"
+	defer recordOperation(operation, time.Now())
+
+	err := in.service.RebootVM(vmID)
+	recordError(operation, err)
+	return err
+}
+
+func (in instrumentedRuntimeService) CreateSnapshot(vmID string, snapshotID string, flags int64) error {
+	const operation = "CreateSnapshot"
+	defer recordOperation(operation, time.Now())
+
+	err := in.service.CreateSnapshot(vmID, snapshotID, flags)
+	recordError(operation, err)
+	return err
+}
+
+func (in instrumentedRuntimeService) RestoreToSnapshot(vmID string, snapshotID string, flags int64) error {
+	const operation = "RestoreToSnapshot"
+	defer recordOperation(operation, time.Now())
+
+	err := in.service.RestoreToSnapshot(vmID, snapshotID, flags)
 	recordError(operation, err)
 	return err
 }
@@ -308,4 +336,31 @@ func (in instrumentedImageManagerService) ImageFsInfo() ([]*runtimeapi.Filesyste
 	fsInfo, err := in.service.ImageFsInfo()
 	recordError(operation, err)
 	return fsInfo, nil
+}
+
+func (in instrumentedRuntimeService) AttachNetworkInterface(podSandboxID string, vmName string, nic *runtimeapi.NicSpec) error {
+	const operation = "AttachNetworkInterface"
+	defer recordOperation(operation, time.Now())
+
+	err := in.service.AttachNetworkInterface(podSandboxID, vmName, nic)
+	recordError(operation, err)
+	return err
+}
+
+func (in instrumentedRuntimeService) DetachNetworkInterface(podSandboxID string, vmName string, nic *runtimeapi.NicSpec) error {
+	const operation = "DetachNetworkInterface"
+	defer recordOperation(operation, time.Now())
+
+	err := in.service.DetachNetworkInterface(podSandboxID, vmName, nic)
+	recordError(operation, err)
+	return err
+}
+
+func (in instrumentedRuntimeService) ListNetworkInterfaces(podSandboxID string, vmName string) ([]*runtimeapi.NicSpec, error) {
+	const operation = "ListNetworkInterface"
+	defer recordOperation(operation, time.Now())
+
+	nics, err := in.service.ListNetworkInterfaces(podSandboxID, vmName)
+	recordError(operation, err)
+	return nics, err
 }

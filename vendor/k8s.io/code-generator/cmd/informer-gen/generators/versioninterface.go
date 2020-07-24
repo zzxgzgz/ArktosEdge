@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,12 +18,14 @@ limitations under the License.
 package generators
 
 import (
+	"fmt"
 	"io"
 
 	"k8s.io/gengo/generator"
 	"k8s.io/gengo/namer"
 	"k8s.io/gengo/types"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/code-generator/cmd/client-gen/generators/util"
 )
 
@@ -64,17 +67,32 @@ func (g *versionInterfaceGenerator) GenerateType(c *generator.Context, t *types.
 		"interfacesTweakListOptionsFunc":  c.Universe.Type(types.Name{Package: g.internalInterfacesPackage, Name: "TweakListOptionsFunc"}),
 		"interfacesSharedInformerFactory": c.Universe.Type(types.Name{Package: g.internalInterfacesPackage, Name: "SharedInformerFactory"}),
 		"types":                           g.types,
+		"DefaultTenant":                   metav1.TenantSystem,
 	}
 
 	sw.Do(versionTemplate, m)
 	for _, typeDef := range g.types {
-		tags, err := util.ParseClientGenTags(append(typeDef.SecondClosestCommentLines, typeDef.CommentLines...))
+		tags, err := util.ParseClientGenTags(typeDef.SecondClosestCommentLines)
 		if err != nil {
 			return err
 		}
-		m["namespaced"] = !tags.NonNamespaced
 		m["type"] = typeDef
-		sw.Do(versionFuncTemplate, m)
+		switch {
+		case tags.NonNamespaced && tags.NonTenanted:
+			//cluster scope
+			sw.Do(versionFuncTemplate_ClusterScope, m)
+
+		case tags.NonNamespaced && !tags.NonTenanted:
+			// tenant scope
+			sw.Do(versionFuncTemplate_TenantScope, m)
+
+		case !tags.NonNamespaced && !tags.NonTenanted:
+			// namespace scope
+			sw.Do(versionFuncTemplate_NamespaceScope, m)
+
+		default:
+			return fmt.Errorf("The scope of (%s) is not supported, namespaced but not tenanted.", t.Name)
+		}
 	}
 
 	return sw.Error()
@@ -91,19 +109,39 @@ type Interface interface {
 
 type version struct {
 	factory $.interfacesSharedInformerFactory|raw$
+	tenant    string
 	namespace string
 	tweakListOptions $.interfacesTweakListOptionsFunc|raw$
 }
 
 // New returns a new Interface.
 func New(f $.interfacesSharedInformerFactory|raw$, namespace string, tweakListOptions $.interfacesTweakListOptionsFunc|raw$) Interface {
-	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+	return &version{factory: f, tenant: "$.DefaultTenant$", namespace: namespace, tweakListOptions: tweakListOptions}
+}
+
+func NewWithMultiTenancy(f $.interfacesSharedInformerFactory|raw$, namespace string, tweakListOptions $.interfacesTweakListOptionsFunc|raw$, tenant string) Interface {
+
+	return &version{factory: f, tenant: tenant, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 `
 
-var versionFuncTemplate = `
+var versionFuncTemplate_ClusterScope = `
 // $.type|publicPlural$ returns a $.type|public$Informer.
 func (v *version) $.type|publicPlural$() $.type|public$Informer {
-	return &$.type|private$Informer{factory: v.factory$if .namespaced$, namespace: v.namespace$end$, tweakListOptions: v.tweakListOptions}
+	return &$.type|private$Informer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+`
+
+var versionFuncTemplate_TenantScope = `
+// $.type|publicPlural$ returns a $.type|public$Informer.
+func (v *version) $.type|publicPlural$() $.type|public$Informer {
+	return &$.type|private$Informer{factory: v.factory, tenant: v.tenant, tweakListOptions: v.tweakListOptions}
+}
+`
+
+var versionFuncTemplate_NamespaceScope = `
+// $.type|publicPlural$ returns a $.type|public$Informer.
+func (v *version) $.type|publicPlural$() $.type|public$Informer {
+	return &$.type|private$Informer{factory: v.factory, namespace: v.namespace, tenant: v.tenant, tweakListOptions: v.tweakListOptions}
 }
 `

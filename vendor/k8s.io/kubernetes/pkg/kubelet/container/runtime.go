@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/fuzzer"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/util/flowcontrol"
@@ -48,6 +50,7 @@ type Version interface {
 // information about the different image types.
 type ImageSpec struct {
 	Image string
+	Pod   *v1.Pod
 }
 
 // ImageStats contains statistics about all the images currently available.
@@ -62,9 +65,6 @@ type ImageStats struct {
 type Runtime interface {
 	// Type returns the type of the container runtime.
 	Type() string
-
-	//SupportsSingleFileMapping returns whether the container runtime supports single file mappings or not.
-	SupportsSingleFileMapping() bool
 
 	// Version returns the version information of the container runtime.
 	Version() (Version, error)
@@ -100,7 +100,7 @@ type Runtime interface {
 	KillPod(pod *v1.Pod, runningPod Pod, gracePeriodOverride *int64) error
 	// GetPodStatus retrieves the status of the pod, including the
 	// information of all containers in the pod that are visible in Runtime.
-	GetPodStatus(uid types.UID, name, namespace string) (*PodStatus, error)
+	GetPodStatus(uid types.UID, name, namespace, tenant string) (*PodStatus, error)
 	// TODO(vmarmol): Unify pod and containerID args.
 	// GetContainerLogs returns logs of a specific container. By
 	// default, it returns a snapshot of the container log. Set 'follow' to true to
@@ -115,6 +115,30 @@ type Runtime interface {
 	// This method just proxies a new runtimeConfig with the updated
 	// CIDR value down to the runtime shim.
 	UpdatePodCIDR(podCIDR string) error
+
+	// Added into the container runtime interface to avoid mass code change to pass new interface to kubelet components for now
+	// TODO: add new filed in kubelet object so the interface can be consumed directly in needed components
+	VmService
+}
+
+// VM related interface methods
+type VmService interface {
+	// Reboot VM, this will relay to virDomainReboot in libvirt
+	RebootVM(*v1.Pod, string) error
+	CreateSnapshot(*v1.Pod, string, string) error
+	RestoreToSnapshot(*v1.Pod, string, string) error
+	VmDeviceManagerService
+}
+
+// VM related device management methods, Nic, Volumes, etc.
+type VmDeviceManagerService interface {
+	// Attach new NIC to the VM in the POD
+	AttachNetworkInterface(*v1.Pod, string, *v1.Nic) error
+	// Detach NIC from the VM in the POD
+	DetachNetworkInterface(*v1.Pod, string, *v1.Nic) error
+	// List all or one NICs attached to the VM in the POD
+	// TODO: consider add interface status as part of the return
+	ListNetworkInterfaces(*v1.Pod, string) ([]*v1.Nic, error)
 }
 
 // StreamingRuntime is the interface implemented by runtimes that handle the serving of the
@@ -123,7 +147,7 @@ type Runtime interface {
 type StreamingRuntime interface {
 	GetExec(id ContainerID, cmd []string, stdin, stdout, stderr, tty bool) (*url.URL, error)
 	GetAttach(id ContainerID, stdin, stdout, stderr, tty bool) (*url.URL, error)
-	GetPortForward(podName, podNamespace string, podUID types.UID, ports []int32) (*url.URL, error)
+	GetPortForward(podName, podNamespace, podTenant string, podUID types.UID, ports []int32) (*url.URL, error)
 }
 
 type ImageService interface {
@@ -167,6 +191,8 @@ type Pod struct {
 	// components. This is only populated by kuberuntime.
 	// TODO: use the runtimeApi.PodSandbox type directly.
 	Sandboxes []*Container
+
+	Tenant string
 }
 
 // PodPair contains both runtime#Pod and api#Pod
@@ -276,13 +302,15 @@ type PodStatus struct {
 	Name string
 	// Namespace of the pod.
 	Namespace string
-	// All IPs assigned to this pod
-	IPs []string
+	// IP of the pod.
+	IP string
 	// Status of containers in the pod.
 	ContainerStatuses []*ContainerStatus
 	// Status of the pod sandbox.
 	// Only for kuberuntime now, other runtime may keep it nil.
 	SandboxStatuses []*runtimeapi.PodSandboxStatus
+
+	Tenant string
 }
 
 // ContainerStatus represents the status of a container.
@@ -315,6 +343,8 @@ type ContainerStatus struct {
 	// Message written by the container before exiting (stored in
 	// TerminationMessagePath).
 	Message string
+	// CPU and memory resources for this container
+	Resources v1.ResourceRequirements
 }
 
 // FindContainerStatusByName returns container status in the pod status with the given name.
@@ -337,6 +367,19 @@ func (podStatus *PodStatus) GetRunningContainerStatuses() []*ContainerStatus {
 		}
 	}
 	return runningContainerStatuses
+}
+
+func (podStatus *PodStatus) DumpStatus() {
+	klog.V(6).Infof("dump pod status, pod name: %s, length of containerStatuses: %v, length of sandboxStatuses: %v",
+		podStatus.Name, len(podStatus.ContainerStatuses), len(podStatus.SandboxStatuses))
+	for _, containerStatus := range podStatus.ContainerStatuses {
+		klog.V(6).Infof("dump pod status, container name: %s, state: %v , status: %v",
+			containerStatus.Name, containerStatus.State, containerStatus)
+	}
+
+	for _, sandboxStatus := range podStatus.SandboxStatuses {
+		klog.V(6).Infof("dump pod status, sandbox name: %s, state: %v", sandboxStatus.Metadata.Name, sandboxStatus.State)
+	}
 }
 
 // Basic information about a container image.
@@ -519,7 +562,7 @@ func (p Pods) FindPodByID(podUID types.UID) Pod {
 // It will return an empty pod if not found.
 func (p Pods) FindPodByFullName(podFullName string) Pod {
 	for i := range p {
-		if BuildPodFullName(p[i].Name, p[i].Namespace) == podFullName {
+		if BuildPodFullName(p[i].Name, p[i].Namespace, p[i].Tenant) == podFullName {
 			return *p[i]
 		}
 	}
@@ -568,11 +611,14 @@ func (p *Pod) FindSandboxByID(id ContainerID) *Container {
 
 // ToAPIPod converts Pod to v1.Pod. Note that if a field in v1.Pod has no
 // corresponding field in Pod, the field would not be populated.
+//TODO: support VM type
 func (p *Pod) ToAPIPod() *v1.Pod {
 	var pod v1.Pod
 	pod.UID = p.ID
+	pod.HashKey = fuzzer.GetHashOfUUID(p.ID)
 	pod.Name = p.Name
 	pod.Namespace = p.Namespace
+	pod.Tenant = p.Tenant
 
 	for _, c := range p.Containers {
 		var container v1.Container
@@ -592,21 +638,21 @@ func (p *Pod) IsEmpty() bool {
 func GetPodFullName(pod *v1.Pod) string {
 	// Use underscore as the delimiter because it is not allowed in pod name
 	// (DNS subdomain format), while allowed in the container name format.
-	return pod.Name + "_" + pod.Namespace
+	return pod.Name + "_" + pod.Namespace + "_" + pod.Tenant
 }
 
 // Build the pod full name from pod name and namespace.
-func BuildPodFullName(name, namespace string) string {
-	return name + "_" + namespace
+func BuildPodFullName(name, namespace, tenant string) string {
+	return name + "_" + namespace + "_" + tenant
 }
 
 // Parse the pod full name.
-func ParsePodFullName(podFullName string) (string, string, error) {
+func ParsePodFullName(podFullName string) (string, string, string, error) {
 	parts := strings.Split(podFullName, "_")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", "", fmt.Errorf("failed to parse the pod full name %q", podFullName)
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return "", "", "", fmt.Errorf("failed to parse the pod full name %q", podFullName)
 	}
-	return parts[0], parts[1], nil
+	return parts[0], parts[1], parts[2], nil
 }
 
 // Option is a functional option type for Runtime, useful for

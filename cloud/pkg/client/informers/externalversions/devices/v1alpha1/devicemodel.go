@@ -62,7 +62,7 @@ func NewFilteredDeviceModelInformer(client versioned.Interface, namespace string
 				}
 				return client.DevicesV1alpha1().DeviceModels(namespace).List(options)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options v1.ListOptions) watch.AggregatedWatchInterface {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}

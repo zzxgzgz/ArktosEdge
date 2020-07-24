@@ -74,7 +74,8 @@ type objectSyncNamespaceLister struct {
 
 // List lists all ObjectSyncs in the indexer for a given namespace.
 func (s objectSyncNamespaceLister) List(selector labels.Selector) (ret []*v1alpha1.ObjectSync, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	tenentName := ""
+	err = cache.ListAllByNamespace(s.indexer, tenentName, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1alpha1.ObjectSync))
 	})
 	return ret, err

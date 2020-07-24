@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import (
 // A group's client should implement this interface.
 type LocalSubjectAccessReviewsGetter interface {
 	LocalSubjectAccessReviews(namespace string) LocalSubjectAccessReviewInterface
+	LocalSubjectAccessReviewsWithMultiTenancy(namespace string, tenant string) LocalSubjectAccessReviewInterface
 }
 
 // LocalSubjectAccessReviewInterface has methods to work with LocalSubjectAccessReview resources.
@@ -35,14 +37,22 @@ type LocalSubjectAccessReviewInterface interface {
 
 // localSubjectAccessReviews implements LocalSubjectAccessReviewInterface
 type localSubjectAccessReviews struct {
-	client rest.Interface
-	ns     string
+	client  rest.Interface
+	clients []rest.Interface
+	ns      string
+	te      string
 }
 
 // newLocalSubjectAccessReviews returns a LocalSubjectAccessReviews
 func newLocalSubjectAccessReviews(c *AuthorizationV1beta1Client, namespace string) *localSubjectAccessReviews {
+	return newLocalSubjectAccessReviewsWithMultiTenancy(c, namespace, "system")
+}
+
+func newLocalSubjectAccessReviewsWithMultiTenancy(c *AuthorizationV1beta1Client, namespace string, tenant string) *localSubjectAccessReviews {
 	return &localSubjectAccessReviews{
-		client: c.RESTClient(),
-		ns:     namespace,
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		ns:      namespace,
+		te:      tenant,
 	}
 }

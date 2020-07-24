@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +45,8 @@ type RESTCreateStrategy interface {
 
 	// NamespaceScoped returns true if the object must be within a namespace.
 	NamespaceScoped() bool
+	// TenantScoped returns true if the object must be within a tenant.
+	TenantScoped() bool
 	// PrepareForCreate is invoked on create before validation to normalize
 	// the object.  For example: remove fields that are not to be persisted,
 	// sort order-insensitive list fields, etc.  This should not remove fields
@@ -84,6 +87,15 @@ func BeforeCreate(strategy RESTCreateStrategy, ctx context.Context, obj runtime.
 	} else if len(objectMeta.GetNamespace()) > 0 {
 		objectMeta.SetNamespace(metav1.NamespaceNone)
 	}
+
+	if strategy.TenantScoped() {
+		if !ValidTenant(ctx, objectMeta) {
+			return errors.NewBadRequest("the tenant of the provided object does not match the tenant sent on the request")
+		}
+	} else if len(objectMeta.GetTenant()) > 0 {
+		objectMeta.SetTenant(metav1.TenantNone)
+	}
+
 	objectMeta.SetDeletionTimestamp(nil)
 	objectMeta.SetDeletionGracePeriodSeconds(nil)
 	strategy.PrepareForCreate(ctx, obj)
@@ -91,6 +103,9 @@ func BeforeCreate(strategy RESTCreateStrategy, ctx context.Context, obj runtime.
 	if len(objectMeta.GetGenerateName()) > 0 && len(objectMeta.GetName()) == 0 {
 		objectMeta.SetName(strategy.GenerateName(objectMeta.GetGenerateName()))
 	}
+
+	// Initializers are a deprecated alpha field and should not be saved
+	objectMeta.SetInitializers(nil)
 
 	// Ensure managedFields is not set unless the feature is enabled
 	if !utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
@@ -109,7 +124,7 @@ func BeforeCreate(strategy RESTCreateStrategy, ctx context.Context, obj runtime.
 	// Custom validation (including name validation) passed
 	// Now run common validation on object meta
 	// Do this *after* custom validation so that specific error messages are shown whenever possible
-	if errs := genericvalidation.ValidateObjectMetaAccessor(objectMeta, strategy.NamespaceScoped(), path.ValidatePathSegmentName, field.NewPath("metadata")); len(errs) > 0 {
+	if errs := genericvalidation.ValidateObjectMetaAccessor(objectMeta, strategy.TenantScoped(), strategy.NamespaceScoped(), path.ValidatePathSegmentName, field.NewPath("metadata")); len(errs) > 0 {
 		return errors.NewInvalid(kind.GroupKind(), objectMeta.GetName(), errs)
 	}
 
@@ -156,27 +171,26 @@ type NamespaceScopedStrategy interface {
 	NamespaceScoped() bool
 }
 
+// TenantScopedStrategy has a method to tell if the object must be in a tenant.
+type TenantScopedStrategy interface {
+	// TenantScoped returns if the object must be in a tenant.
+	TenantScoped() bool
+}
+
 // AdmissionToValidateObjectFunc converts validating admission to a rest validate object func
 func AdmissionToValidateObjectFunc(admit admission.Interface, staticAttributes admission.Attributes, o admission.ObjectInterfaces) ValidateObjectFunc {
 	validatingAdmission, ok := admit.(admission.ValidationInterface)
 	if !ok {
-		return func(ctx context.Context, obj runtime.Object) error { return nil }
+		return func(obj runtime.Object) error { return nil }
 	}
-	return func(ctx context.Context, obj runtime.Object) error {
-		name := staticAttributes.GetName()
-		// in case the generated name is populated
-		if len(name) == 0 {
-			if metadata, err := meta.Accessor(obj); err == nil {
-				name = metadata.GetName()
-			}
-		}
-
+	return func(obj runtime.Object) error {
 		finalAttributes := admission.NewAttributesRecord(
 			obj,
 			staticAttributes.GetOldObject(),
 			staticAttributes.GetKind(),
+			staticAttributes.GetTenant(),
 			staticAttributes.GetNamespace(),
-			name,
+			staticAttributes.GetName(),
 			staticAttributes.GetResource(),
 			staticAttributes.GetSubresource(),
 			staticAttributes.GetOperation(),
@@ -187,6 +201,6 @@ func AdmissionToValidateObjectFunc(admit admission.Interface, staticAttributes a
 		if !validatingAdmission.Handles(finalAttributes.GetOperation()) {
 			return nil
 		}
-		return validatingAdmission.Validate(ctx, finalAttributes, o)
+		return validatingAdmission.Validate(finalAttributes, o)
 	}
 }

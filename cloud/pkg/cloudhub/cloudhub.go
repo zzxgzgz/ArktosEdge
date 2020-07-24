@@ -131,9 +131,10 @@ func buildConfig() (conf *rest.Config, err error) {
 	if err != nil {
 		return nil, err
 	}
-	kubeConfig.QPS = float32(hubconfig.Config.KubeAPIConfig.QPS)
-	kubeConfig.Burst = int(hubconfig.Config.KubeAPIConfig.Burst)
-	kubeConfig.ContentType = "application/json"
+	kconfig := kubeConfig.GetConfig()
+	kconfig.QPS = float32(hubconfig.Config.KubeAPIConfig.QPS)
+	kconfig.Burst = int(hubconfig.Config.KubeAPIConfig.Burst)
+	kconfig.ContentType = "application/json"
 
 	return kubeConfig, nil
 }

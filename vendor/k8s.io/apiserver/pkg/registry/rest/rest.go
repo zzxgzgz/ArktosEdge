@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -63,6 +64,8 @@ type Storage interface {
 type Scoper interface {
 	// NamespaceScoped returns true if the storage is namespaced
 	NamespaceScoped() bool
+	// TenantScoped returns true if the storage is tenanted
+	TenantScoped() bool
 }
 
 // KindProvider specifies a different kind for its API than for its internal storage.  This is necessary for external
@@ -210,20 +213,20 @@ type UpdatedObjectInfo interface {
 // ValidateObjectFunc is a function to act on a given object. An error may be returned
 // if the hook cannot be completed. An ObjectFunc may NOT transform the provided
 // object.
-type ValidateObjectFunc func(ctx context.Context, obj runtime.Object) error
+type ValidateObjectFunc func(obj runtime.Object) error
 
 // ValidateAllObjectFunc is a "admit everything" instance of ValidateObjectFunc.
-func ValidateAllObjectFunc(ctx context.Context, obj runtime.Object) error {
+func ValidateAllObjectFunc(obj runtime.Object) error {
 	return nil
 }
 
 // ValidateObjectUpdateFunc is a function to act on a given object and its predecessor.
 // An error may be returned if the hook cannot be completed. An UpdateObjectFunc
 // may NOT transform the provided object.
-type ValidateObjectUpdateFunc func(ctx context.Context, obj, old runtime.Object) error
+type ValidateObjectUpdateFunc func(obj, old runtime.Object) error
 
 // ValidateAllObjectUpdateFunc is a "admit everything" instance of ValidateObjectUpdateFunc.
-func ValidateAllObjectUpdateFunc(ctx context.Context, obj, old runtime.Object) error {
+func ValidateAllObjectUpdateFunc(obj, old runtime.Object) error {
 	return nil
 }
 

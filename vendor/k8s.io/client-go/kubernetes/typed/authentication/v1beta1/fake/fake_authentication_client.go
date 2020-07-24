@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +30,11 @@ type FakeAuthenticationV1beta1 struct {
 }
 
 func (c *FakeAuthenticationV1beta1) TokenReviews() v1beta1.TokenReviewInterface {
-	return &FakeTokenReviews{c}
+	return &FakeTokenReviews{c, "system"}
+}
+
+func (c *FakeAuthenticationV1beta1) TokenReviewsWithMultiTenancy(tenant string) v1beta1.TokenReviewInterface {
+	return &FakeTokenReviews{c, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -37,4 +42,11 @@ func (c *FakeAuthenticationV1beta1) TokenReviews() v1beta1.TokenReviewInterface 
 func (c *FakeAuthenticationV1beta1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeAuthenticationV1beta1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

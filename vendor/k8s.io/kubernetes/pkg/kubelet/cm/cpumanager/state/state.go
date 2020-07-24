@@ -20,7 +20,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 )
 
-// ContainerCPUAssignments type used in cpu manager state
+// ContainerCPUAssignments type used in cpu manger state
 type ContainerCPUAssignments map[string]cpuset.CPUSet
 
 // Clone returns a copy of ContainerCPUAssignments

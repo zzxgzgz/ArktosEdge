@@ -2,6 +2,7 @@
 
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,7 +31,7 @@ type kubenetNetworkPlugin struct {
 	network.NoopNetworkPlugin
 }
 
-func NewPlugin(networkPluginDirs []string, cacheDir string) network.NetworkPlugin {
+func NewPlugin(networkPluginDirs []string) network.NetworkPlugin {
 	return &kubenetNetworkPlugin{}
 }
 
@@ -42,14 +43,14 @@ func (plugin *kubenetNetworkPlugin) Name() string {
 	return "kubenet"
 }
 
-func (plugin *kubenetNetworkPlugin) SetUpPod(namespace string, name string, id kubecontainer.ContainerID, annotations, options map[string]string) error {
+func (plugin *kubenetNetworkPlugin) SetUpPod(tenant, namespace string, name string, id kubecontainer.ContainerID, annotations, options map[string]string) error {
 	return fmt.Errorf("Kubenet is not supported in this build")
 }
 
-func (plugin *kubenetNetworkPlugin) TearDownPod(namespace string, name string, id kubecontainer.ContainerID) error {
+func (plugin *kubenetNetworkPlugin) TearDownPod(tenant, namespace string, name string, id kubecontainer.ContainerID) error {
 	return fmt.Errorf("Kubenet is not supported in this build")
 }
 
-func (plugin *kubenetNetworkPlugin) GetPodNetworkStatus(namespace string, name string, id kubecontainer.ContainerID) (*network.PodNetworkStatus, error) {
+func (plugin *kubenetNetworkPlugin) GetPodNetworkStatus(tenant, namespace string, name string, id kubecontainer.ContainerID) (*network.PodNetworkStatus, error) {
 	return nil, fmt.Errorf("Kubenet is not supported in this build")
 }

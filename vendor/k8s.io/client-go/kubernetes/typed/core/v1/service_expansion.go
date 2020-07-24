@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,6 +30,7 @@ type ServiceExpansion interface {
 // ProxyGet returns a response of the service by calling it through the proxy.
 func (c *services) ProxyGet(scheme, name, port, path string, params map[string]string) restclient.ResponseWrapper {
 	request := c.client.Get().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("services").
 		SubResource("proxy").

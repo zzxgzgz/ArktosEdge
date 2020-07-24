@@ -41,6 +41,7 @@ import (
 const (
 	LabelSystemRoot   = "root"
 	LabelDockerImages = "docker-images"
+	LabelRktImages    = "rkt-images"
 	LabelCrioImages   = "crio-images"
 )
 
@@ -117,6 +118,7 @@ func NewFsInfo(context Context) (FsInfo, error) {
 		fsInfo.mounts[mount.Mountpoint] = mount
 	}
 
+	fsInfo.addRktImagesLabel(context, mounts)
 	// need to call this before the log line below printing out the partitions, as this function may
 	// add a "partition" for devicemapper to fsInfo.partitions
 	fsInfo.addDockerImagesLabel(context, mounts)
@@ -165,22 +167,19 @@ func processMounts(mounts []*mount.Info, excludedMountpointPrefixes []string) ma
 
 	supportedFsType := map[string]bool{
 		// all ext systems are checked through prefix.
-		"btrfs":   true,
-		"overlay": true,
-		"tmpfs":   true,
-		"xfs":     true,
-		"zfs":     true,
+		"btrfs": true,
+		"tmpfs": true,
+		"xfs":   true,
+		"zfs":   true,
 	}
 
 	for _, mount := range mounts {
 		if !strings.HasPrefix(mount.Fstype, "ext") && !supportedFsType[mount.Fstype] {
 			continue
 		}
-		// Avoid bind mounts, exclude tmpfs.
+		// Avoid bind mounts.
 		if _, ok := partitions[mount.Source]; ok {
-			if mount.Fstype != "tmpfs" {
-				continue
-			}
+			continue
 		}
 
 		hasPrefix := false
@@ -194,10 +193,6 @@ func processMounts(mounts []*mount.Info, excludedMountpointPrefixes []string) ma
 			continue
 		}
 
-		// using mountpoint to replace device once fstype it tmpfs
-		if mount.Fstype == "tmpfs" {
-			mount.Source = mount.Mountpoint
-		}
 		// btrfs fix: following workaround fixes wrong btrfs Major and Minor Ids reported in /proc/self/mountinfo.
 		// instead of using values from /proc/self/mountinfo we use stat to get Ids from btrfs mount point
 		if mount.Fstype == "btrfs" && mount.Major == 0 && strings.HasPrefix(mount.Source, "/dev/") {
@@ -208,11 +203,6 @@ func processMounts(mounts []*mount.Info, excludedMountpointPrefixes []string) ma
 				mount.Major = major
 				mount.Minor = minor
 			}
-		}
-
-		// overlay fix: Making mount source unique for all overlay mounts, using the mount's major and minor ids.
-		if mount.Fstype == "overlay" {
-			mount.Source = fmt.Sprintf("%s_%d-%d", mount.Source, mount.Major, mount.Minor)
 		}
 
 		partitions[mount.Source] = partition{
@@ -297,6 +287,20 @@ func (self *RealFsInfo) addCrioImagesLabel(context Context, mounts []*mount.Info
 			crioPath = filepath.Dir(crioPath)
 		}
 		self.updateContainerImagesPath(LabelCrioImages, mounts, crioImagePaths)
+	}
+}
+
+func (self *RealFsInfo) addRktImagesLabel(context Context, mounts []*mount.Info) {
+	if context.RktPath != "" {
+		rktPath := context.RktPath
+		rktImagesPaths := map[string]struct{}{
+			"/": {},
+		}
+		for rktPath != "/" && rktPath != "." {
+			rktImagesPaths[rktPath] = struct{}{}
+			rktPath = filepath.Dir(rktPath)
+		}
+		self.updateContainerImagesPath(LabelRktImages, mounts, rktImagesPaths)
 	}
 }
 

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -182,14 +183,14 @@ func (ds *dockerService) CreateContainer(_ context.Context, r *runtimeapi.Create
 		if cleanupInfo != nil {
 			// we don't perform the clean up just yet at that could destroy information
 			// needed for the container to start (e.g. Windows credentials stored in
-			// registry keys); instead, we'll clean up when the container gets removed
+			// registry keys); instead, we'll clean up after the container successfully
+			// starts or gets removed
 			ds.containerCleanupInfos[containerID] = cleanupInfo
 		}
 		return &runtimeapi.CreateContainerResponse{ContainerId: containerID}, nil
 	}
 
-	// the creation failed, let's clean up right away - we ignore any errors though,
-	// this is best effort
+	// the creation failed, let's clean up right away
 	ds.performPlatformSpecificContainerCleanupAndLogErrors(containerName, cleanupInfo)
 
 	return nil, createErr
@@ -278,6 +279,8 @@ func (ds *dockerService) StartContainer(_ context.Context, r *runtimeapi.StartCo
 		return nil, fmt.Errorf("failed to start container %q: %v", r.ContainerId, err)
 	}
 
+	ds.performPlatformSpecificContainerForContainer(r.ContainerId)
+
 	return &runtimeapi.StartContainerResponse{}, nil
 }
 
@@ -292,6 +295,8 @@ func (ds *dockerService) StopContainer(_ context.Context, r *runtimeapi.StopCont
 
 // RemoveContainer removes the container.
 func (ds *dockerService) RemoveContainer(_ context.Context, r *runtimeapi.RemoveContainerRequest) (*runtimeapi.RemoveContainerResponse, error) {
+	ds.performPlatformSpecificContainerForContainer(r.ContainerId)
+
 	// Ideally, log lifecycle should be independent of container lifecycle.
 	// However, docker will remove container log after container is removed,
 	// we can't prevent that now, so we also clean up the symlink here.
@@ -299,15 +304,10 @@ func (ds *dockerService) RemoveContainer(_ context.Context, r *runtimeapi.Remove
 	if err != nil {
 		return nil, err
 	}
-	errors := ds.performPlatformSpecificContainerForContainer(r.ContainerId)
-	if len(errors) != 0 {
-		return nil, fmt.Errorf("failed to run platform-specific clean ups for container %q: %v", r.ContainerId, errors)
-	}
 	err = ds.client.RemoveContainer(r.ContainerId, dockertypes.ContainerRemoveOptions{RemoveVolumes: true, Force: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to remove container %q: %v", r.ContainerId, err)
 	}
-
 	return &runtimeapi.RemoveContainerResponse{}, nil
 }
 
@@ -415,6 +415,17 @@ func (ds *dockerService) ContainerStatus(_ context.Context, req *runtimeapi.Cont
 	if len(ir.RepoTags) > 0 {
 		imageName = ir.RepoTags[0]
 	}
+
+	resources := &runtimeapi.LinuxContainerResources{
+		CpuPeriod:          r.ContainerJSONBase.HostConfig.Resources.CPUPeriod,
+		CpuQuota:           r.ContainerJSONBase.HostConfig.Resources.CPUQuota,
+		CpuShares:          r.ContainerJSONBase.HostConfig.Resources.CPUShares,
+		MemoryLimitInBytes: r.ContainerJSONBase.HostConfig.Resources.Memory,
+		OomScoreAdj:        int64(r.ContainerJSONBase.HostConfig.OomScoreAdj),
+		CpusetCpus:         r.ContainerJSONBase.HostConfig.Resources.CpusetCpus,
+		CpusetMems:         r.ContainerJSONBase.HostConfig.Resources.CpusetMems,
+	}
+
 	status := &runtimeapi.ContainerStatus{
 		Id:          r.ID,
 		Metadata:    metadata,
@@ -431,6 +442,7 @@ func (ds *dockerService) ContainerStatus(_ context.Context, req *runtimeapi.Cont
 		Labels:      labels,
 		Annotations: annotations,
 		LogPath:     r.Config.Labels[containerLogPathLabelKey],
+		Resources:   resources,
 	}
 	return &runtimeapi.ContainerStatusResponse{Status: status}, nil
 }
@@ -455,27 +467,43 @@ func (ds *dockerService) UpdateContainerResources(_ context.Context, r *runtimea
 	return &runtimeapi.UpdateContainerResourcesResponse{}, nil
 }
 
-func (ds *dockerService) performPlatformSpecificContainerForContainer(containerID string) (errors []error) {
+func (ds *dockerService) performPlatformSpecificContainerForContainer(containerID string) {
 	if cleanupInfo, present := ds.containerCleanupInfos[containerID]; present {
-		errors = ds.performPlatformSpecificContainerCleanupAndLogErrors(containerID, cleanupInfo)
-
-		if len(errors) == 0 {
-			delete(ds.containerCleanupInfos, containerID)
-		}
+		ds.performPlatformSpecificContainerCleanupAndLogErrors(containerID, cleanupInfo)
+		delete(ds.containerCleanupInfos, containerID)
 	}
-
-	return
 }
 
-func (ds *dockerService) performPlatformSpecificContainerCleanupAndLogErrors(containerNameOrID string, cleanupInfo *containerCleanupInfo) []error {
+func (ds *dockerService) performPlatformSpecificContainerCleanupAndLogErrors(containerNameOrID string, cleanupInfo *containerCleanupInfo) {
 	if cleanupInfo == nil {
-		return nil
+		return
 	}
 
-	errors := ds.performPlatformSpecificContainerCleanup(cleanupInfo)
-	for _, err := range errors {
+	for _, err := range ds.performPlatformSpecificContainerCleanup(cleanupInfo) {
 		klog.Warningf("error when cleaning up after container %q: %v", containerNameOrID, err)
 	}
+}
 
-	return errors
+func (ds *dockerService) RebootVM(_ context.Context, _ *runtimeapi.RebootVMRequest) (*runtimeapi.RebootVMResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (ds *dockerService) CreateSnapshot(_ context.Context, _ *runtimeapi.CreateSnapshotRequest) (*runtimeapi.CreateSnapshotResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (ds *dockerService) RestoreToSnapshot(_ context.Context, _ *runtimeapi.RestoreToSnapshotRequest) (*runtimeapi.RestoreToSnapshotResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (ds *dockerService) AttachNetworkInterface(_ context.Context, _ *runtimeapi.DeviceAttachDetachRequest) (*runtimeapi.DeviceAttachDetachResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (ds *dockerService) DetachNetworkInterface(_ context.Context, _ *runtimeapi.DeviceAttachDetachRequest) (*runtimeapi.DeviceAttachDetachResponse, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (ds *dockerService) ListNetworkInterfaces(_ context.Context, _ *runtimeapi.ListDeviceRequest) (*runtimeapi.ListDeviceResponse, error) {
+	return nil, fmt.Errorf("not implemented")
 }

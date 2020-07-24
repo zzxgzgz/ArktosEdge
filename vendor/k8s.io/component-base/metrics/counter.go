@@ -34,8 +34,10 @@ type Counter struct {
 // However, the object returned will not measure anything unless the collector is first
 // registered, since the metric is lazily instantiated.
 func NewCounter(opts *CounterOpts) *Counter {
-	opts.StabilityLevel.setDefaults()
-
+	// todo: handle defaulting better
+	if opts.StabilityLevel == "" {
+		opts.StabilityLevel = ALPHA
+	}
 	kc := &Counter{
 		CounterOpts: opts,
 		lazyMetric:  lazyMetric{},
@@ -53,7 +55,7 @@ func (c *Counter) setPrometheusCounter(counter prometheus.Counter) {
 
 // DeprecatedVersion returns a pointer to the Version or nil
 func (c *Counter) DeprecatedVersion() *semver.Version {
-	return parseSemver(c.CounterOpts.DeprecatedVersion)
+	return c.CounterOpts.DeprecatedVersion
 }
 
 // initializeMetric invocation creates the actual underlying Counter. Until this method is called
@@ -84,8 +86,10 @@ type CounterVec struct {
 // However, the object returned will not measure anything unless the collector is first
 // registered, since the metric is lazily instantiated.
 func NewCounterVec(opts *CounterOpts, labels []string) *CounterVec {
-	opts.StabilityLevel.setDefaults()
-
+	// todo: handle defaulting better
+	if opts.StabilityLevel == "" {
+		opts.StabilityLevel = ALPHA
+	}
 	cv := &CounterVec{
 		CounterVec:     noopCounterVec,
 		CounterOpts:    opts,
@@ -98,8 +102,7 @@ func NewCounterVec(opts *CounterOpts, labels []string) *CounterVec {
 
 // DeprecatedVersion returns a pointer to the Version or nil
 func (v *CounterVec) DeprecatedVersion() *semver.Version {
-	return parseSemver(v.CounterOpts.DeprecatedVersion)
-
+	return v.CounterOpts.DeprecatedVersion
 }
 
 // initializeMetric invocation creates the actual underlying CounterVec. Until this method is called
@@ -139,32 +142,9 @@ func (v *CounterVec) WithLabelValues(lvs ...string) CounterMetric {
 // must match those of the VariableLabels in Desc). If that label map is
 // accessed for the first time, a new Counter is created IFF the counterVec has
 // been registered to a metrics registry.
-func (v *CounterVec) With(labels map[string]string) CounterMetric {
+func (v *CounterVec) With(labels prometheus.Labels) CounterMetric {
 	if !v.IsCreated() {
 		return noop // return no-op counter
 	}
 	return v.CounterVec.With(labels)
-}
-
-// Delete deletes the metric where the variable labels are the same as those
-// passed in as labels. It returns true if a metric was deleted.
-//
-// It is not an error if the number and names of the Labels are inconsistent
-// with those of the VariableLabels in Desc. However, such inconsistent Labels
-// can never match an actual metric, so the method will always return false in
-// that case.
-func (v *CounterVec) Delete(labels map[string]string) bool {
-	if !v.IsCreated() {
-		return false // since we haven't created the metric, we haven't deleted a metric with the passed in values
-	}
-	return v.CounterVec.Delete(labels)
-}
-
-// Reset deletes all metrics in this vector.
-func (v *CounterVec) Reset() {
-	if !v.IsCreated() {
-		return
-	}
-
-	v.CounterVec.Reset()
 }

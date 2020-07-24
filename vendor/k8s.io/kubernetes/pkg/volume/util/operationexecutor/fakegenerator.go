@@ -19,11 +19,10 @@ package operationexecutor
 import (
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	csitrans "k8s.io/csi-translation-lib"
+	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
-	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
 )
 
@@ -65,7 +64,7 @@ func (f *fakeOGCounter) GenerateVolumesAreAttachedFunc(attachedVolumes []Attache
 	return f.recordFuncCall("GenerateVolumesAreAttachedFunc"), nil
 }
 
-func (f *fakeOGCounter) GenerateUnmountDeviceFunc(deviceToDetach AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, hu hostutil.HostUtils) (volumetypes.GeneratedOperations, error) {
+func (f *fakeOGCounter) GenerateUnmountDeviceFunc(deviceToDetach AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) (volumetypes.GeneratedOperations, error) {
 	return f.recordFuncCall("GenerateUnmountDeviceFunc"), nil
 }
 
@@ -81,16 +80,12 @@ func (f *fakeOGCounter) GenerateUnmapVolumeFunc(volumeToUnmount MountedVolume, a
 	return f.recordFuncCall("GenerateUnmapVolumeFunc"), nil
 }
 
-func (f *fakeOGCounter) GenerateUnmapDeviceFunc(deviceToDetach AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, hu hostutil.HostUtils) (volumetypes.GeneratedOperations, error) {
+func (f *fakeOGCounter) GenerateUnmapDeviceFunc(deviceToDetach AttachedVolume, actualStateOfWorld ActualStateOfWorldMounterUpdater, mounter mount.Interface) (volumetypes.GeneratedOperations, error) {
 	return f.recordFuncCall("GenerateUnmapDeviceFunc"), nil
 }
 
 func (f *fakeOGCounter) GetVolumePluginMgr() *volume.VolumePluginMgr {
 	return nil
-}
-
-func (f *fakeOGCounter) GetCSITranslator() InTreeToCSITranslator {
-	return csitrans.New()
 }
 
 func (f *fakeOGCounter) GenerateBulkVolumeVerifyFunc(

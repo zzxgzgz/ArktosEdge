@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"sync"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
@@ -83,10 +83,10 @@ func (pm *PodManager) Events() chan watch.Event {
 func NewPodManager(kubeClient *kubernetes.Clientset, namespace, nodeName string) (*PodManager, error) {
 	var lw *cache.ListWatch
 	if "" == nodeName {
-		lw = cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, fields.Everything())
+		lw = cache.NewListWatchFromClient(kubeClient.CoreV1(), "pods", namespace, fields.Everything())
 	} else {
 		selector := fields.OneTermEqualSelector("spec.nodeName", nodeName)
-		lw = cache.NewListWatchFromClient(kubeClient.CoreV1().RESTClient(), "pods", namespace, selector)
+		lw = cache.NewListWatchFromClient(kubeClient.CoreV1(), "pods", namespace, selector)
 	}
 	realEvents := make(chan watch.Event, config.Config.Buffer.PodEvent)
 	mergedEvents := make(chan watch.Event, config.Config.Buffer.PodEvent)

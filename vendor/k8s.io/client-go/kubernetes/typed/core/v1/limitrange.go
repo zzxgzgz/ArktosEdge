@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,20 +20,24 @@ limitations under the License.
 package v1
 
 import (
+	strings "strings"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 // LimitRangesGetter has a method to return a LimitRangeInterface.
 // A group's client should implement this interface.
 type LimitRangesGetter interface {
 	LimitRanges(namespace string) LimitRangeInterface
+	LimitRangesWithMultiTenancy(namespace string, tenant string) LimitRangeInterface
 }
 
 // LimitRangeInterface has methods to work with LimitRange resources.
@@ -43,22 +48,30 @@ type LimitRangeInterface interface {
 	DeleteCollection(options *metav1.DeleteOptions, listOptions metav1.ListOptions) error
 	Get(name string, options metav1.GetOptions) (*v1.LimitRange, error)
 	List(opts metav1.ListOptions) (*v1.LimitRangeList, error)
-	Watch(opts metav1.ListOptions) (watch.Interface, error)
+	Watch(opts metav1.ListOptions) watch.AggregatedWatchInterface
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.LimitRange, err error)
 	LimitRangeExpansion
 }
 
 // limitRanges implements LimitRangeInterface
 type limitRanges struct {
-	client rest.Interface
-	ns     string
+	client  rest.Interface
+	clients []rest.Interface
+	ns      string
+	te      string
 }
 
 // newLimitRanges returns a LimitRanges
 func newLimitRanges(c *CoreV1Client, namespace string) *limitRanges {
+	return newLimitRangesWithMultiTenancy(c, namespace, "system")
+}
+
+func newLimitRangesWithMultiTenancy(c *CoreV1Client, namespace string, tenant string) *limitRanges {
 	return &limitRanges{
-		client: c.RESTClient(),
-		ns:     namespace,
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		ns:      namespace,
+		te:      tenant,
 	}
 }
 
@@ -66,12 +79,14 @@ func newLimitRanges(c *CoreV1Client, namespace string) *limitRanges {
 func (c *limitRanges) Get(name string, options metav1.GetOptions) (result *v1.LimitRange, err error) {
 	result = &v1.LimitRange{}
 	err = c.client.Get().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("limitranges").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -83,58 +98,120 @@ func (c *limitRanges) List(opts metav1.ListOptions) (result *v1.LimitRangeList, 
 	}
 	result = &v1.LimitRangeList{}
 	err = c.client.Get().
-		Namespace(c.ns).
+		Tenant(c.te).Namespace(c.ns).
 		Resource("limitranges").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
 		Do().
 		Into(result)
+	if err == nil {
+		return
+	}
+
+	if !(errors.IsForbidden(err) && strings.Contains(err.Error(), "no relationship found between node")) {
+		return
+	}
+
+	// Found api server that works with this list, keep the client
+	for _, client := range c.clients {
+		if client == c.client {
+			continue
+		}
+
+		err = client.Get().
+			Tenant(c.te).Namespace(c.ns).
+			Resource("limitranges").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Do().
+			Into(result)
+
+		if err == nil {
+			c.client = client
+			return
+		}
+
+		if err != nil && errors.IsForbidden(err) &&
+			strings.Contains(err.Error(), "no relationship found between node") {
+			klog.V(6).Infof("Skip error %v in list", err)
+			continue
+		}
+	}
+
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested limitRanges.
-func (c *limitRanges) Watch(opts metav1.ListOptions) (watch.Interface, error) {
+func (c *limitRanges) Watch(opts metav1.ListOptions) watch.AggregatedWatchInterface {
 	var timeout time.Duration
 	if opts.TimeoutSeconds != nil {
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("limitranges").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch()
+	aggWatch := watch.NewAggregatedWatcher()
+	for _, client := range c.clients {
+		watcher, err := client.Get().
+			Tenant(c.te).
+			Namespace(c.ns).
+			Resource("limitranges").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Watch()
+		if err != nil && opts.AllowPartialWatch && errors.IsForbidden(err) {
+			// watch error was not returned properly in error message. Skip when partial watch is allowed
+			klog.V(6).Infof("Watch error for partial watch %v. options [%+v]", err, opts)
+			continue
+		}
+		aggWatch.AddWatchInterface(watcher, err)
+	}
+	return aggWatch
 }
 
 // Create takes the representation of a limitRange and creates it.  Returns the server's representation of the limitRange, and an error, if there is any.
 func (c *limitRanges) Create(limitRange *v1.LimitRange) (result *v1.LimitRange, err error) {
 	result = &v1.LimitRange{}
+
+	objectTenant := limitRange.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Post().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("limitranges").
 		Body(limitRange).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Update takes the representation of a limitRange and updates it. Returns the server's representation of the limitRange, and an error, if there is any.
 func (c *limitRanges) Update(limitRange *v1.LimitRange) (result *v1.LimitRange, err error) {
 	result = &v1.LimitRange{}
+
+	objectTenant := limitRange.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("limitranges").
 		Name(limitRange.Name).
 		Body(limitRange).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Delete takes name of the limitRange and deletes it. Returns an error if one occurs.
 func (c *limitRanges) Delete(name string, options *metav1.DeleteOptions) error {
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("limitranges").
 		Name(name).
@@ -150,6 +227,7 @@ func (c *limitRanges) DeleteCollection(options *metav1.DeleteOptions, listOption
 		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
 	}
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("limitranges").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
@@ -163,6 +241,7 @@ func (c *limitRanges) DeleteCollection(options *metav1.DeleteOptions, listOption
 func (c *limitRanges) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1.LimitRange, err error) {
 	result = &v1.LimitRange{}
 	err = c.client.Patch(pt).
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("limitranges").
 		SubResource(subresources...).
@@ -170,5 +249,6 @@ func (c *limitRanges) Patch(name string, pt types.PatchType, data []byte, subres
 		Body(data).
 		Do().
 		Into(result)
+
 	return
 }

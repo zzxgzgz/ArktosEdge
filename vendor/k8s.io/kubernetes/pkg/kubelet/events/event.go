@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -66,6 +67,7 @@ const (
 	SandboxChanged                       = "SandboxChanged"
 	FailedCreatePodSandBox               = "FailedCreatePodSandBox"
 	FailedStatusPodSandBox               = "FailedPodSandBoxStatus"
+	FailedNetworkReadiness               = "FailedPodNetworkReadiness"
 
 	// Image manager event reason list
 	InvalidDiskCapacity = "InvalidDiskCapacity"
@@ -84,4 +86,10 @@ const (
 	// Lifecycle hooks
 	FailedPostStartHook = "FailedPostStartHook"
 	FailedPreStopHook   = "FailedPreStopHook"
+
+	// device hotplug event reason list
+	DeviceAttached     = "DeviceAttached"
+	DeviceDetached     = "DeviceDetached"
+	FailedAttachDevice = "FailedAttachDevice"
+	FailedDetachDevice = "FailedDetachDevice"
 )

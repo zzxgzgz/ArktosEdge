@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,68 +29,154 @@ type FakeCoreV1 struct {
 	*testing.Fake
 }
 
+func (c *FakeCoreV1) Actions(namespace string) v1.ActionInterface {
+	return &FakeActions{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) ActionsWithMultiTenancy(namespace string, tenant string) v1.ActionInterface {
+	return &FakeActions{c, namespace, tenant}
+}
+
 func (c *FakeCoreV1) ComponentStatuses() v1.ComponentStatusInterface {
+
 	return &FakeComponentStatuses{c}
 }
 
 func (c *FakeCoreV1) ConfigMaps(namespace string) v1.ConfigMapInterface {
-	return &FakeConfigMaps{c, namespace}
+	return &FakeConfigMaps{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) ConfigMapsWithMultiTenancy(namespace string, tenant string) v1.ConfigMapInterface {
+	return &FakeConfigMaps{c, namespace, tenant}
+}
+
+func (c *FakeCoreV1) ControllerInstances() v1.ControllerInstanceInterface {
+
+	return &FakeControllerInstances{c}
+}
+
+func (c *FakeCoreV1) DataPartitionConfigs() v1.DataPartitionConfigInterface {
+
+	return &FakeDataPartitionConfigs{c}
 }
 
 func (c *FakeCoreV1) Endpoints(namespace string) v1.EndpointsInterface {
-	return &FakeEndpoints{c, namespace}
+	return &FakeEndpoints{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) EndpointsWithMultiTenancy(namespace string, tenant string) v1.EndpointsInterface {
+	return &FakeEndpoints{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) Events(namespace string) v1.EventInterface {
-	return &FakeEvents{c, namespace}
+	return &FakeEvents{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) EventsWithMultiTenancy(namespace string, tenant string) v1.EventInterface {
+	return &FakeEvents{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) LimitRanges(namespace string) v1.LimitRangeInterface {
-	return &FakeLimitRanges{c, namespace}
+	return &FakeLimitRanges{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) LimitRangesWithMultiTenancy(namespace string, tenant string) v1.LimitRangeInterface {
+	return &FakeLimitRanges{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) Namespaces() v1.NamespaceInterface {
-	return &FakeNamespaces{c}
+	return &FakeNamespaces{c, "system"}
+}
+
+func (c *FakeCoreV1) NamespacesWithMultiTenancy(tenant string) v1.NamespaceInterface {
+	return &FakeNamespaces{c, tenant}
 }
 
 func (c *FakeCoreV1) Nodes() v1.NodeInterface {
+
 	return &FakeNodes{c}
 }
 
 func (c *FakeCoreV1) PersistentVolumes() v1.PersistentVolumeInterface {
-	return &FakePersistentVolumes{c}
+	return &FakePersistentVolumes{c, "system"}
+}
+
+func (c *FakeCoreV1) PersistentVolumesWithMultiTenancy(tenant string) v1.PersistentVolumeInterface {
+	return &FakePersistentVolumes{c, tenant}
 }
 
 func (c *FakeCoreV1) PersistentVolumeClaims(namespace string) v1.PersistentVolumeClaimInterface {
-	return &FakePersistentVolumeClaims{c, namespace}
+	return &FakePersistentVolumeClaims{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) PersistentVolumeClaimsWithMultiTenancy(namespace string, tenant string) v1.PersistentVolumeClaimInterface {
+	return &FakePersistentVolumeClaims{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) Pods(namespace string) v1.PodInterface {
-	return &FakePods{c, namespace}
+	return &FakePods{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) PodsWithMultiTenancy(namespace string, tenant string) v1.PodInterface {
+	return &FakePods{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) PodTemplates(namespace string) v1.PodTemplateInterface {
-	return &FakePodTemplates{c, namespace}
+	return &FakePodTemplates{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) PodTemplatesWithMultiTenancy(namespace string, tenant string) v1.PodTemplateInterface {
+	return &FakePodTemplates{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) ReplicationControllers(namespace string) v1.ReplicationControllerInterface {
-	return &FakeReplicationControllers{c, namespace}
+	return &FakeReplicationControllers{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) ReplicationControllersWithMultiTenancy(namespace string, tenant string) v1.ReplicationControllerInterface {
+	return &FakeReplicationControllers{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) ResourceQuotas(namespace string) v1.ResourceQuotaInterface {
-	return &FakeResourceQuotas{c, namespace}
+	return &FakeResourceQuotas{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) ResourceQuotasWithMultiTenancy(namespace string, tenant string) v1.ResourceQuotaInterface {
+	return &FakeResourceQuotas{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) Secrets(namespace string) v1.SecretInterface {
-	return &FakeSecrets{c, namespace}
+	return &FakeSecrets{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) SecretsWithMultiTenancy(namespace string, tenant string) v1.SecretInterface {
+	return &FakeSecrets{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) Services(namespace string) v1.ServiceInterface {
-	return &FakeServices{c, namespace}
+	return &FakeServices{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) ServicesWithMultiTenancy(namespace string, tenant string) v1.ServiceInterface {
+	return &FakeServices{c, namespace, tenant}
 }
 
 func (c *FakeCoreV1) ServiceAccounts(namespace string) v1.ServiceAccountInterface {
-	return &FakeServiceAccounts{c, namespace}
+	return &FakeServiceAccounts{c, namespace, "system"}
+}
+
+func (c *FakeCoreV1) ServiceAccountsWithMultiTenancy(namespace string, tenant string) v1.ServiceAccountInterface {
+	return &FakeServiceAccounts{c, namespace, tenant}
+}
+
+func (c *FakeCoreV1) StorageClusters() v1.StorageClusterInterface {
+
+	return &FakeStorageClusters{c}
+}
+
+func (c *FakeCoreV1) Tenants() v1.TenantInterface {
+
+	return &FakeTenants{c}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -97,4 +184,11 @@ func (c *FakeCoreV1) ServiceAccounts(namespace string) v1.ServiceAccountInterfac
 func (c *FakeCoreV1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeCoreV1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

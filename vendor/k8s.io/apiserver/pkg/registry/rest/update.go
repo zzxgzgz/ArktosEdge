@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -40,6 +41,8 @@ type RESTUpdateStrategy interface {
 	runtime.ObjectTyper
 	// NamespaceScoped returns true if the object must be within a namespace.
 	NamespaceScoped() bool
+	// TenantScoped returns true if the object must be within a tenant.
+	TenantScoped() bool
 	// AllowCreateOnUpdate returns true if the object can be created by a PUT.
 	AllowCreateOnUpdate() bool
 	// PrepareForUpdate is invoked on update before validation to normalize
@@ -74,7 +77,7 @@ func validateCommonFields(obj, old runtime.Object, strategy RESTUpdateStrategy) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get old object metadata: %v", err)
 	}
-	allErrs = append(allErrs, genericvalidation.ValidateObjectMetaAccessor(objectMeta, strategy.NamespaceScoped(), path.ValidatePathSegmentName, field.NewPath("metadata"))...)
+	allErrs = append(allErrs, genericvalidation.ValidateObjectMetaAccessor(objectMeta, strategy.TenantScoped(), strategy.NamespaceScoped(), path.ValidatePathSegmentName, field.NewPath("metadata"))...)
 	allErrs = append(allErrs, genericvalidation.ValidateObjectMetaAccessorUpdate(objectMeta, oldObjectMeta, field.NewPath("metadata"))...)
 
 	return allErrs, nil
@@ -97,12 +100,24 @@ func BeforeUpdate(strategy RESTUpdateStrategy, ctx context.Context, obj, old run
 		objectMeta.SetNamespace(metav1.NamespaceNone)
 	}
 
+	if strategy.TenantScoped() {
+		if !ValidTenant(ctx, objectMeta) {
+			return errors.NewBadRequest("the tenant of the provided object does not match the tenant sent on the request")
+		}
+	} else if len(objectMeta.GetTenant()) > 0 {
+		objectMeta.SetTenant(metav1.TenantNone)
+	}
+
 	// Ensure requests cannot update generation
 	oldMeta, err := meta.Accessor(old)
 	if err != nil {
 		return err
 	}
 	objectMeta.SetGeneration(oldMeta.GetGeneration())
+
+	// Initializers are a deprecated alpha field and should not be saved
+	oldMeta.SetInitializers(nil)
+	objectMeta.SetInitializers(nil)
 
 	// Ensure managedFields state is removed unless ServerSideApply is enabled
 	if !utilfeature.DefaultFeatureGate.Enabled(features.ServerSideApply) {
@@ -120,6 +135,11 @@ func BeforeUpdate(strategy RESTUpdateStrategy, ctx context.Context, obj, old run
 	if len(objectMeta.GetUID()) == 0 {
 		objectMeta.SetUID(oldMeta.GetUID())
 	}
+	// Use the existing HashKey if none is provided
+	if objectMeta.GetHashKey() == 0 {
+		objectMeta.SetHashKey(oldMeta.GetHashKey())
+	}
+
 	// ignore changes to timestamp
 	if oldCreationTime := oldMeta.GetCreationTimestamp(); !oldCreationTime.IsZero() {
 		objectMeta.SetCreationTimestamp(oldMeta.GetCreationTimestamp())
@@ -255,13 +275,14 @@ func (i *wrappedUpdatedObjectInfo) UpdatedObject(ctx context.Context, oldObj run
 func AdmissionToValidateObjectUpdateFunc(admit admission.Interface, staticAttributes admission.Attributes, o admission.ObjectInterfaces) ValidateObjectUpdateFunc {
 	validatingAdmission, ok := admit.(admission.ValidationInterface)
 	if !ok {
-		return func(ctx context.Context, obj, old runtime.Object) error { return nil }
+		return func(obj, old runtime.Object) error { return nil }
 	}
-	return func(ctx context.Context, obj, old runtime.Object) error {
+	return func(obj, old runtime.Object) error {
 		finalAttributes := admission.NewAttributesRecord(
 			obj,
 			old,
 			staticAttributes.GetKind(),
+			staticAttributes.GetTenant(),
 			staticAttributes.GetNamespace(),
 			staticAttributes.GetName(),
 			staticAttributes.GetResource(),
@@ -274,6 +295,6 @@ func AdmissionToValidateObjectUpdateFunc(admit admission.Interface, staticAttrib
 		if !validatingAdmission.Handles(finalAttributes.GetOperation()) {
 			return nil
 		}
-		return validatingAdmission.Validate(ctx, finalAttributes, o)
+		return validatingAdmission.Validate(finalAttributes, o)
 	}
 }

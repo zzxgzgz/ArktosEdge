@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +18,7 @@ limitations under the License.
 package qos
 
 import (
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubernetes/pkg/apis/core"
@@ -41,39 +42,41 @@ func GetPodQOS(pod *v1.Pod) v1.PodQOSClass {
 	limits := v1.ResourceList{}
 	zeroQuantity := resource.MustParse("0")
 	isGuaranteed := true
-	allContainers := []v1.Container{}
-	allContainers = append(allContainers, pod.Spec.Containers...)
-	allContainers = append(allContainers, pod.Spec.InitContainers...)
-	for _, container := range allContainers {
+
+	defer func() {
+		pod.Spec.WorkloadInfo = nil
+	}()
+
+	for _, workload := range pod.Spec.Workloads() {
 		// process requests
-		for name, quantity := range container.Resources.Requests {
+		for name, quantity := range workload.Resources.Requests {
 			if !isSupportedQoSComputeResource(name) {
 				continue
 			}
 			if quantity.Cmp(zeroQuantity) == 1 {
-				delta := quantity.DeepCopy()
+				delta := quantity.Copy()
 				if _, exists := requests[name]; !exists {
-					requests[name] = delta
+					requests[name] = *delta
 				} else {
 					delta.Add(requests[name])
-					requests[name] = delta
+					requests[name] = *delta
 				}
 			}
 		}
 		// process limits
 		qosLimitsFound := sets.NewString()
-		for name, quantity := range container.Resources.Limits {
+		for name, quantity := range workload.Resources.Limits {
 			if !isSupportedQoSComputeResource(name) {
 				continue
 			}
 			if quantity.Cmp(zeroQuantity) == 1 {
 				qosLimitsFound.Insert(string(name))
-				delta := quantity.DeepCopy()
+				delta := quantity.Copy()
 				if _, exists := limits[name]; !exists {
-					limits[name] = delta
+					limits[name] = *delta
 				} else {
 					delta.Add(limits[name])
-					limits[name] = delta
+					limits[name] = *delta
 				}
 			}
 		}

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,6 +44,19 @@ func DefaultClusterScopedAttr(obj runtime.Object) (labels.Set, fields.Set, error
 	return labels.Set(metadata.GetLabels()), fieldSet, nil
 }
 
+func DefaultTenantScopedAttr(obj runtime.Object) (labels.Set, fields.Set, error) {
+	metadata, err := meta.Accessor(obj)
+	if err != nil {
+		return nil, nil, err
+	}
+	fieldSet := fields.Set{
+		"metadata.name":   metadata.GetName(),
+		"metadata.tenant": metadata.GetTenant(),
+	}
+
+	return labels.Set(metadata.GetLabels()), fieldSet, nil
+}
+
 func DefaultNamespaceScopedAttr(obj runtime.Object) (labels.Set, fields.Set, error) {
 	metadata, err := meta.Accessor(obj)
 	if err != nil {
@@ -51,6 +65,7 @@ func DefaultNamespaceScopedAttr(obj runtime.Object) (labels.Set, fields.Set, err
 	fieldSet := fields.Set{
 		"metadata.name":      metadata.GetName(),
 		"metadata.namespace": metadata.GetNamespace(),
+		"metadata.tenant":    metadata.GetTenant(),
 	}
 
 	return labels.Set(metadata.GetLabels()), fieldSet, nil
@@ -122,6 +137,20 @@ func (s *SelectionPredicate) MatchesSingle() (string, bool) {
 		return name, true
 	}
 	return "", false
+}
+
+// For any index defined by IndexFields, if a matcher can match only (a subset)
+// of objects that return <value> for a given index, a pair (<index name>, <value>)
+// wil be returned.
+// TODO: Consider supporting also labels.
+func (s *SelectionPredicate) MatcherIndex() []MatchValue {
+	var result []MatchValue
+	for _, field := range s.IndexFields {
+		if value, ok := s.Field.RequiresExactMatch(field); ok {
+			result = append(result, MatchValue{IndexName: field, Value: value})
+		}
+	}
+	return result
 }
 
 // Empty returns true if the predicate performs no filtering.

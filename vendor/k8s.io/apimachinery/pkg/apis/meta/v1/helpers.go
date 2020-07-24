@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +18,7 @@ limitations under the License.
 package v1
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/fields"
@@ -239,7 +238,7 @@ func NewRVDeletionPrecondition(rv string) *DeleteOptions {
 // HasObjectMetaSystemFieldValues returns true if fields that are managed by the system on ObjectMeta have values.
 func HasObjectMetaSystemFieldValues(meta Object) bool {
 	return !meta.GetCreationTimestamp().Time.IsZero() ||
-		len(meta.GetUID()) != 0
+		(len(meta.GetUID()) != 0 && meta.GetHashKey() != 0)
 }
 
 // ResetObjectMetaForStatus forces the meta fields for a status update to match the meta fields
@@ -249,6 +248,7 @@ func ResetObjectMetaForStatus(meta, existingMeta Object) {
 	meta.SetGeneration(existingMeta.GetGeneration())
 	meta.SetSelfLink(existingMeta.GetSelfLink())
 	meta.SetLabels(existingMeta.GetLabels())
+	meta.SetHashKey(existingMeta.GetHashKey())
 	meta.SetAnnotations(existingMeta.GetAnnotations())
 	meta.SetFinalizers(existingMeta.GetFinalizers())
 	meta.SetOwnerReferences(existingMeta.GetOwnerReferences())
@@ -256,25 +256,14 @@ func ResetObjectMetaForStatus(meta, existingMeta Object) {
 }
 
 // MarshalJSON implements json.Marshaler
-// MarshalJSON may get called on pointers or values, so implement MarshalJSON on value.
-// http://stackoverflow.com/questions/21390979/custom-marshaljson-never-gets-called-in-go
-func (f FieldsV1) MarshalJSON() ([]byte, error) {
-	if f.Raw == nil {
-		return []byte("null"), nil
-	}
-	return f.Raw, nil
+func (f Fields) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&f.Map)
 }
 
 // UnmarshalJSON implements json.Unmarshaler
-func (f *FieldsV1) UnmarshalJSON(b []byte) error {
-	if f == nil {
-		return errors.New("metav1.Fields: UnmarshalJSON on nil pointer")
-	}
-	if !bytes.Equal(b, []byte("null")) {
-		f.Raw = append(f.Raw[0:0], b...)
-	}
-	return nil
+func (f *Fields) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &f.Map)
 }
 
-var _ json.Marshaler = FieldsV1{}
-var _ json.Unmarshaler = &FieldsV1{}
+var _ json.Marshaler = Fields{}
+var _ json.Unmarshaler = &Fields{}

@@ -9,10 +9,8 @@ load(
 go_library(
     name = "go_default_library",
     srcs = [
-        "common.go",
         "doc.go",
-        "proxier_health.go",
-        "service_health.go",
+        "healthcheck.go",
     ],
     importpath = "k8s.io/kubernetes/pkg/proxy/healthcheck",
     deps = [

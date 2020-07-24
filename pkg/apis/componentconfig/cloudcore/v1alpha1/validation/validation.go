@@ -26,7 +26,6 @@ import (
 	componentbaseconfig "k8s.io/component-base/config"
 	"k8s.io/klog"
 
-	"github.com/kubeedge/kubeedge/common/constants"
 	"github.com/kubeedge/kubeedge/pkg/apis/componentconfig/cloudcore/v1alpha1"
 	utilvalidation "github.com/kubeedge/kubeedge/pkg/util/validation"
 )
@@ -50,9 +49,9 @@ func ValidateLeaderElectionConfiguration(l componentbaseconfig.LeaderElectionCon
 		return field.ErrorList{}
 	}
 	allErrs := field.ErrorList{}
-	if l.ResourceNamespace != constants.KubeEdgeNameSpace {
-		allErrs = append(allErrs, field.Required(field.NewPath("ResourceNamespace"), "resourceLock's namesapce must be kubeedge"))
-	}
+	// if l.ResourceNamespace != constants.KubeEdgeNameSpace {
+	// 	allErrs = append(allErrs, field.Required(field.NewPath("ResourceNamespace"), "resourceLock's namesapce must be kubeedge"))
+	// }
 	return allErrs
 }
 

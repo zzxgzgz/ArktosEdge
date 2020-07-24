@@ -74,7 +74,7 @@ type deviceNamespaceLister struct {
 
 // List lists all Devices in the indexer for a given namespace.
 func (s deviceNamespaceLister) List(selector labels.Selector) (ret []*v1alpha1.Device, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, "", s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1alpha1.Device))
 	})
 	return ret, err

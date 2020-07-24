@@ -20,11 +20,8 @@ package winstats
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -56,11 +53,7 @@ var (
 
 // NewPerfCounterClient creates a client using perf counters
 func NewPerfCounterClient() (Client, error) {
-	// Initialize the cache
-	initCache := cpuUsageCoreNanoSecondsCache{0, 0}
-	return newClient(&perfCounterNodeStatsClient{
-		cpuUsageCoreNanoSecondsCache: initCache,
-	})
+	return newClient(&perfCounterNodeStatsClient{})
 }
 
 // perfCounterNodeStatsClient is a client that provides Windows Stats via PerfCounters
@@ -68,8 +61,6 @@ type perfCounterNodeStatsClient struct {
 	nodeMetrics
 	mu sync.RWMutex // mu protects nodeMetrics
 	nodeInfo
-	// cpuUsageCoreNanoSecondsCache caches the cpu usage for nodes.
-	cpuUsageCoreNanoSecondsCache
 }
 
 func (p *perfCounterNodeStatsClient) startMonitoring() error {
@@ -78,14 +69,19 @@ func (p *perfCounterNodeStatsClient) startMonitoring() error {
 		return err
 	}
 
-	osInfo, err := GetOSInfo()
+	kernelVersion, err := getKernelVersion()
+	if err != nil {
+		return err
+	}
+
+	osImageVersion, err := getOSImageVersion()
 	if err != nil {
 		return err
 	}
 
 	p.nodeInfo = nodeInfo{
-		kernelVersion:               osInfo.GetPatchVersion(),
-		osImageVersion:              osInfo.ProductName,
+		kernelVersion:               kernelVersion,
+		osImageVersion:              osImageVersion,
 		memoryPhysicalCapacityBytes: memory,
 		startTime:                   time.Now(),
 	}
@@ -114,17 +110,6 @@ func (p *perfCounterNodeStatsClient) startMonitoring() error {
 		p.collectMetricsData(cpuCounter, memWorkingSetCounter, memCommittedBytesCounter, networkAdapterCounter)
 	}, perfCounterUpdatePeriod)
 
-	// Cache the CPU usage every defaultCachePeriod
-	go wait.Forever(func() {
-		newValue := p.nodeMetrics.cpuUsageCoreNanoSeconds
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		p.cpuUsageCoreNanoSecondsCache = cpuUsageCoreNanoSecondsCache{
-			previousValue: p.cpuUsageCoreNanoSecondsCache.latestValue,
-			latestValue:   newValue,
-		}
-	}, defaultCachePeriod)
-
 	return nil
 }
 
@@ -134,16 +119,10 @@ func (p *perfCounterNodeStatsClient) getMachineInfo() (*cadvisorapi.MachineInfo,
 		return nil, err
 	}
 
-	systemUUID, err := getSystemUUID()
-	if err != nil {
-		return nil, err
-	}
-
 	return &cadvisorapi.MachineInfo{
 		NumCores:       runtime.NumCPU(),
 		MemoryCapacity: p.nodeInfo.memoryPhysicalCapacityBytes,
 		MachineID:      hostname,
-		SystemUUID:     systemUUID,
 	}, nil
 }
 
@@ -166,7 +145,6 @@ func (p *perfCounterNodeStatsClient) getNodeInfo() nodeInfo {
 
 func (p *perfCounterNodeStatsClient) collectMetricsData(cpuCounter, memWorkingSetCounter, memCommittedBytesCounter *perfCounter, networkAdapterCounter *networkCounter) {
 	cpuValue, err := cpuCounter.getData()
-	cpuCores := runtime.NumCPU()
 	if err != nil {
 		klog.Errorf("Unable to get cpu perf counter data; err: %v", err)
 		return
@@ -193,8 +171,7 @@ func (p *perfCounterNodeStatsClient) collectMetricsData(cpuCounter, memWorkingSe
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.nodeMetrics = nodeMetrics{
-		cpuUsageCoreNanoSeconds:   p.convertCPUValue(cpuCores, cpuValue),
-		cpuUsageNanoCores:         p.getCPUUsageNanoCores(),
+		cpuUsageCoreNanoSeconds:   p.convertCPUValue(cpuValue),
 		memoryPrivWorkingSetBytes: memWorkingSetValue,
 		memoryCommittedBytes:      memCommittedBytesValue,
 		interfaceStats:            networkAdapterStats,
@@ -202,30 +179,13 @@ func (p *perfCounterNodeStatsClient) collectMetricsData(cpuCounter, memWorkingSe
 	}
 }
 
-func (p *perfCounterNodeStatsClient) convertCPUValue(cpuCores int, cpuValue uint64) uint64 {
+func (p *perfCounterNodeStatsClient) convertCPUValue(cpuValue uint64) uint64 {
+	cpuCores := runtime.NumCPU()
 	// This converts perf counter data which is cpu percentage for all cores into nanoseconds.
 	// The formula is (cpuPercentage / 100.0) * #cores * 1e+9 (nano seconds). More info here:
 	// https://github.com/kubernetes/heapster/issues/650
 	newValue := p.nodeMetrics.cpuUsageCoreNanoSeconds + uint64((float64(cpuValue)/100.0)*float64(cpuCores)*1e9)
 	return newValue
-}
-
-func (p *perfCounterNodeStatsClient) getCPUUsageNanoCores() uint64 {
-	cachePeriodSeconds := uint64(defaultCachePeriod / time.Second)
-	cpuUsageNanoCores := (p.cpuUsageCoreNanoSecondsCache.latestValue - p.cpuUsageCoreNanoSecondsCache.previousValue) / cachePeriodSeconds
-	return cpuUsageNanoCores
-}
-
-func getSystemUUID() (string, error) {
-	result, err := exec.Command("wmic", "csproduct", "get", "UUID").Output()
-	if err != nil {
-		return "", err
-	}
-	fields := strings.Fields(string(result))
-	if len(fields) != 2 {
-		return "", fmt.Errorf("received unexpected value retrieving vm uuid: %q", string(result))
-	}
-	return fields[1], nil
 }
 
 func getPhysicallyInstalledSystemMemoryBytes() (uint64, error) {

@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type PodTemplateLister interface {
 	List(selector labels.Selector) (ret []*v1.PodTemplate, err error)
 	// PodTemplates returns an object that can list and get PodTemplates.
 	PodTemplates(namespace string) PodTemplateNamespaceLister
+	PodTemplatesWithMultiTenancy(namespace string, tenant string) PodTemplateNamespaceLister
 	PodTemplateListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *podTemplateLister) List(selector labels.Selector) (ret []*v1.PodTemplat
 
 // PodTemplates returns an object that can list and get PodTemplates.
 func (s *podTemplateLister) PodTemplates(namespace string) PodTemplateNamespaceLister {
-	return podTemplateNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return podTemplateNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *podTemplateLister) PodTemplatesWithMultiTenancy(namespace string, tenant string) PodTemplateNamespaceLister {
+	return podTemplateNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // PodTemplateNamespaceLister helps list and get PodTemplates.
 type PodTemplateNamespaceLister interface {
-	// List lists all PodTemplates in the indexer for a given namespace.
+	// List lists all PodTemplates in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.PodTemplate, err error)
-	// Get retrieves the PodTemplate from the indexer for a given namespace and name.
+	// Get retrieves the PodTemplate from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.PodTemplate, error)
 	PodTemplateNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type PodTemplateNamespaceLister interface {
 type podTemplateNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all PodTemplates in the indexer for a given namespace.
 func (s podTemplateNamespaceLister) List(selector labels.Selector) (ret []*v1.PodTemplate, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.PodTemplate))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s podTemplateNamespaceLister) List(selector labels.Selector) (ret []*v1.Po
 
 // Get retrieves the PodTemplate from the indexer for a given namespace and name.
 func (s podTemplateNamespaceLister) Get(name string) (*v1.PodTemplate, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

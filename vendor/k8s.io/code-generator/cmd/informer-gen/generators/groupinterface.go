@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +26,8 @@ import (
 	"k8s.io/gengo/generator"
 	"k8s.io/gengo/namer"
 	"k8s.io/gengo/types"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // groupInterfaceGenerator generates the per-group interface file.
@@ -82,6 +85,7 @@ func (g *groupInterfaceGenerator) GenerateType(c *generator.Context, t *types.Ty
 		"interfacesTweakListOptionsFunc":  c.Universe.Type(types.Name{Package: g.internalInterfacesPackage, Name: "TweakListOptionsFunc"}),
 		"interfacesSharedInformerFactory": c.Universe.Type(types.Name{Package: g.internalInterfacesPackage, Name: "SharedInformerFactory"}),
 		"versions":                        versions,
+		"DefaultTenant":                   metav1.TenantSystem,
 	}
 
 	sw.Do(groupTemplate, m)
@@ -101,18 +105,23 @@ type Interface interface {
 type group struct {
 	factory $.interfacesSharedInformerFactory|raw$
 	namespace string
+	tenant    string
 	tweakListOptions  $.interfacesTweakListOptionsFunc|raw$
 }
 
 // New returns a new Interface.
-func New(f $.interfacesSharedInformerFactory|raw$, namespace string, tweakListOptions $.interfacesTweakListOptionsFunc|raw$) Interface {
-	return &group{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+func New(f $.interfacesSharedInformerFactory|raw$, namespace string, tweakListOptions $.interfacesTweakListOptionsFunc|raw$,) Interface {
+	return &group{factory: f, namespace: namespace, tenant: "$.DefaultTenant$", tweakListOptions: tweakListOptions}
+}
+
+func NewWithMultiTenancy(f $.interfacesSharedInformerFactory|raw$, namespace string, tweakListOptions $.interfacesTweakListOptionsFunc|raw$, tenant string) Interface {
+	return &group{factory: f, namespace: namespace, tenant: tenant, tweakListOptions: tweakListOptions}
 }
 
 $range .versions$
 // $.Name$ returns a new $.Interface|raw$.
 func (g *group) $.Name$() $.Interface|raw$ {
-	return $.New|raw$(g.factory, g.namespace, g.tweakListOptions)
+	return $.New|raw$WithMultiTenancy(g.factory, g.namespace, g.tweakListOptions, g.tenant)
 }
 $end$
 `

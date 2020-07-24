@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,8 +25,6 @@ import (
 
 // Interface provides access to all the informers in this group version.
 type Interface interface {
-	// CSINodes returns a CSINodeInformer.
-	CSINodes() CSINodeInformer
 	// StorageClasses returns a StorageClassInformer.
 	StorageClasses() StorageClassInformer
 	// VolumeAttachments returns a VolumeAttachmentInformer.
@@ -34,18 +33,19 @@ type Interface interface {
 
 type version struct {
 	factory          internalinterfaces.SharedInformerFactory
+	tenant           string
 	namespace        string
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
 }
 
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
-	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+	return &version{factory: f, tenant: "system", namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// CSINodes returns a CSINodeInformer.
-func (v *version) CSINodes() CSINodeInformer {
-	return &cSINodeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+func NewWithMultiTenancy(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc, tenant string) Interface {
+
+	return &version{factory: f, tenant: tenant, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
 // StorageClasses returns a StorageClassInformer.
@@ -55,5 +55,5 @@ func (v *version) StorageClasses() StorageClassInformer {
 
 // VolumeAttachments returns a VolumeAttachmentInformer.
 func (v *version) VolumeAttachments() VolumeAttachmentInformer {
-	return &volumeAttachmentInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+	return &volumeAttachmentInformer{factory: v.factory, tenant: v.tenant, tweakListOptions: v.tweakListOptions}
 }

@@ -254,10 +254,10 @@ func (c *csiMountMgr) SetUpAt(dir string, mounterArgs volume.MounterArgs) error 
 		return err
 	}
 
-	c.supportsSELinux, err = c.kubeVolHost.GetHostUtil().GetSELinuxSupport(dir)
-	if err != nil {
-		klog.V(2).Info(log("error checking for SELinux support: %s", err))
-	}
+	// c.supportsSELinux, err = c.kubeVolHost.GetHostUtil().GetSELinuxSupport(dir)
+	// if err != nil {
+	// 	klog.V(2).Info(log("error checking for SELinux support: %s", err))
+	// }
 
 	// apply volume ownership
 	// The following logic is derived from https://github.com/kubernetes/kubernetes/issues/66323
@@ -324,18 +324,18 @@ func (c *csiMountMgr) podAttributes() (map[string]string, error) {
 }
 
 func (c *csiMountMgr) GetAttributes() volume.Attributes {
-	path := c.GetPath()
-	supportSelinux, err := c.kubeVolHost.GetHostUtil().GetSELinuxSupport(path)
-	if err != nil {
-		klog.V(2).Info(log("error checking for SELinux support: %s", err))
-		// Best guess
-		supportSelinux = false
-	}
+	// path := c.GetPath()
+	// supportSelinux, err := c.kubeVolHost.GetHostUtil().GetSELinuxSupport(path)
+	// if err != nil {
+	// 	klog.V(2).Info(log("error checking for SELinux support: %s", err))
+	// 	// Best guess
+	// 	supportSelinux = false
+	// }
 
 	return volume.Attributes{
 		ReadOnly:        c.readOnly,
 		Managed:         !c.readOnly,
-		SupportsSELinux: supportSelinux,
+		SupportsSELinux: true,
 	}
 }
 

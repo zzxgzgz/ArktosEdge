@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/rest"
@@ -21,12 +21,13 @@ func NewCRDClient(cfg *rest.Config) (*rest.RESTClient, error) {
 	}
 
 	config := *cfg
-	config.APIPath = "/apis"
-	config.GroupVersion = &v1alpha1.SchemeGroupVersion
-	config.ContentType = runtime.ContentTypeJSON
-	config.NegotiatedSerializer = serializer.NewCodecFactory(scheme).WithoutConversion()
+	kubeconfig := config.GetConfig()
+	kubeconfig.APIPath = "/apis"
+	kubeconfig.GroupVersion = &v1alpha1.SchemeGroupVersion
+	kubeconfig.ContentType = runtime.ContentTypeJSON
+	kubeconfig.NegotiatedSerializer = serializer.NewCodecFactory(scheme).WithoutConversion()
 
-	client, err := rest.RESTClientFor(&config)
+	client, err := rest.RESTClientFor(kubeconfig)
 	if err != nil {
 		klog.Errorf("Failed to create REST Client due to error %v", err)
 		return nil, err

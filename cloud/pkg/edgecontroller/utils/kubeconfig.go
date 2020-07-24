@@ -14,9 +14,9 @@ func KubeConfig() (conf *rest.Config, err error) {
 	if err != nil {
 		return nil, err
 	}
-	kubeConfig.QPS = float32(config.Config.KubeAPIConfig.QPS)
-	kubeConfig.Burst = int(config.Config.KubeAPIConfig.Burst)
-	kubeConfig.ContentType = config.Config.KubeAPIConfig.ContentType
+	kubeConfig.GetConfig().QPS = float32(config.Config.KubeAPIConfig.QPS)
+	kubeConfig.GetConfig().Burst = int(config.Config.KubeAPIConfig.Burst)
+	kubeConfig.GetConfig().ContentType = config.Config.KubeAPIConfig.ContentType
 
 	return kubeConfig, nil
 }

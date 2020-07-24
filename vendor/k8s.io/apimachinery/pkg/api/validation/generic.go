@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +18,10 @@ limitations under the License.
 package validation
 
 import (
+	"fmt"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 )
@@ -55,6 +58,21 @@ func NameIsDNS1035Label(name string, prefix bool) []string {
 	}
 	return validation.IsDNS1035Label(name)
 }
+
+// ValidateTenantName can be used to check whether the given tenant name is valid.
+func ValidateTenantName(name string, prefix bool) []string {
+	forbiddenTenantNames := []string{metav1.TenantAllExplicit}
+	for _, forbiddenName := range forbiddenTenantNames {
+		if name == forbiddenName {
+			return []string{fmt.Sprintf("is not an acceptable tenant name")}
+		}
+	}
+
+	return NameIsDNSLabel(name, prefix)
+}
+
+// ValidateControllerTypeName can be used to check whether the given controller type name is valid.
+var ValidateControllerTypeName = NameIsDNSLabel
 
 // ValidateNamespaceName can be used to check whether the given namespace name is valid.
 // Prefix indicates this name will be used as part of generation, in which case

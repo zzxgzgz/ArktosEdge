@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +18,7 @@ limitations under the License.
 package generators
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 
@@ -24,6 +26,7 @@ import (
 	"k8s.io/gengo/namer"
 	"k8s.io/gengo/types"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/code-generator/cmd/client-gen/generators/util"
 	"k8s.io/code-generator/cmd/client-gen/path"
 )
@@ -96,12 +99,17 @@ func (g *genGroup) GenerateType(c *generator.Context, t *types.Type, w io.Writer
 		"Version":                        namer.IC(g.version),
 		"types":                          g.types,
 		"apiPath":                        apiPath(g.group),
+		"klogFatal":                      c.Universe.Function(types.Name{Package: "k8s.io/klog", Name: "Fatalf"}),
+		"ranSeed":                        c.Universe.Function(types.Name{Package: "math/rand", Name: "Seed"}),
+		"ranIntn":                        c.Universe.Function(types.Name{Package: "math/rand", Name: "Intn"}),
 		"schemaGroupVersion":             c.Universe.Type(types.Name{Package: "k8s.io/apimachinery/pkg/runtime/schema", Name: "GroupVersion"}),
 		"runtimeAPIVersionInternal":      c.Universe.Variable(types.Name{Package: "k8s.io/apimachinery/pkg/runtime", Name: "APIVersionInternal"}),
 		"restConfig":                     c.Universe.Type(types.Name{Package: "k8s.io/client-go/rest", Name: "Config"}),
+		"getClientSetsWatcher":           c.Universe.Function(types.Name{Package: "k8s.io/client-go/apiserverupdate", Name: "GetClientSetsWatcher"}),
 		"restDefaultKubernetesUserAgent": c.Universe.Function(types.Name{Package: "k8s.io/client-go/rest", Name: "DefaultKubernetesUserAgent"}),
 		"restRESTClientInterface":        c.Universe.Type(types.Name{Package: "k8s.io/client-go/rest", Name: "Interface"}),
 		"restRESTClientFor":              c.Universe.Function(types.Name{Package: "k8s.io/client-go/rest", Name: "RESTClientFor"}),
+		"restRESTClientCopyConfig":       c.Universe.Function(types.Name{Package: "k8s.io/client-go/rest", Name: "CopyConfigs"}),
 		"SchemeGroupVersion":             c.Universe.Variable(types.Name{Package: path.Vendorless(g.inputPackage), Name: "SchemeGroupVersion"}),
 	}
 	sw.Do(groupInterfaceTemplate, m)
@@ -112,14 +120,24 @@ func (g *genGroup) GenerateType(c *generator.Context, t *types.Type, w io.Writer
 			return err
 		}
 		wrapper := map[string]interface{}{
-			"type":        t,
-			"GroupGoName": g.groupGoName,
-			"Version":     namer.IC(g.version),
+			"type":          t,
+			"GroupGoName":   g.groupGoName,
+			"Version":       namer.IC(g.version),
+			"DefaultTenant": metav1.TenantSystem,
 		}
-		if tags.NonNamespaced {
-			sw.Do(getterImplNonNamespaced, wrapper)
-		} else {
-			sw.Do(getterImplNamespaced, wrapper)
+
+		switch {
+		case tags.NonNamespaced && tags.NonTenanted:
+			sw.Do(getterImplClusterScoped, wrapper)
+
+		case tags.NonNamespaced && !tags.NonTenanted:
+			sw.Do(getterImplTenantScoped, wrapper)
+
+		case !tags.NonNamespaced && !tags.NonTenanted:
+			sw.Do(getterImplNamespaceScoped, wrapper)
+
+		default:
+			return fmt.Errorf("The scope of (%s) is not supported, namespaced but not tenanted.", t.Name)
 		}
 	}
 	sw.Do(newClientForConfigTemplate, m)
@@ -131,13 +149,16 @@ func (g *genGroup) GenerateType(c *generator.Context, t *types.Type, w io.Writer
 		sw.Do(setClientDefaultsTemplate, m)
 	}
 	sw.Do(getRESTClient, m)
+	sw.Do(getRESTClients, m)
 
+	sw.Do(run, m)
 	return sw.Error()
 }
 
 var groupInterfaceTemplate = `
 type $.GroupGoName$$.Version$Interface interface {
     RESTClient() $.restRESTClientInterface|raw$
+    RESTClients() []$.restRESTClientInterface|raw$
     $range .types$ $.|publicPlural$Getter
     $end$
 }
@@ -146,17 +167,32 @@ type $.GroupGoName$$.Version$Interface interface {
 var groupClientTemplate = `
 // $.GroupGoName$$.Version$Client is used to interact with features provided by the $.groupName$ group.
 type $.GroupGoName$$.Version$Client struct {
-	restClient $.restRESTClientInterface|raw$
+	restClients []$.restRESTClientInterface|raw$
+	configs *$.restConfig|raw$
 }
 `
 
-var getterImplNamespaced = `
+var getterImplNamespaceScoped = `
 func (c *$.GroupGoName$$.Version$Client) $.type|publicPlural$(namespace string) $.type|public$Interface {
-	return new$.type|publicPlural$(c, namespace)
+	return new$.type|publicPlural$WithMultiTenancy(c, namespace, "$.DefaultTenant$")
+}
+
+func (c *$.GroupGoName$$.Version$Client) $.type|publicPlural$WithMultiTenancy(namespace string, tenant string) $.type|public$Interface {
+	return new$.type|publicPlural$WithMultiTenancy(c, namespace, tenant)
 }
 `
 
-var getterImplNonNamespaced = `
+var getterImplTenantScoped = `
+func (c *$.GroupGoName$$.Version$Client) $.type|publicPlural$() $.type|public$Interface {
+	return new$.type|publicPlural$WithMultiTenancy(c, "$.DefaultTenant$")
+}
+
+func (c *$.GroupGoName$$.Version$Client) $.type|publicPlural$WithMultiTenancy(tenant string) $.type|public$Interface {
+	return new$.type|publicPlural$WithMultiTenancy(c, tenant)
+}
+`
+
+var getterImplClusterScoped = `
 func (c *$.GroupGoName$$.Version$Client) $.type|publicPlural$() $.type|public$Interface {
 	return new$.type|publicPlural$(c)
 }
@@ -165,15 +201,28 @@ func (c *$.GroupGoName$$.Version$Client) $.type|publicPlural$() $.type|public$In
 var newClientForConfigTemplate = `
 // NewForConfig creates a new $.GroupGoName$$.Version$Client for the given config.
 func NewForConfig(c *$.restConfig|raw$) (*$.GroupGoName$$.Version$Client, error) {
-	config := *c
-	if err := setConfigDefaults(&config); err != nil {
+	configs := $.restRESTClientCopyConfig|raw$(c)
+	if err := setConfigDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := $.restRESTClientFor|raw$(&config)
-	if err != nil {
-		return nil, err
+
+	clients := make([]rest.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := $.restRESTClientFor|raw$(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
 	}
-	return &$.GroupGoName$$.Version$Client{client}, nil
+
+	obj := &$.GroupGoName$$.Version$Client{
+		restClients: clients,
+		configs:     configs,
+	}
+
+	obj.run()
+
+	return obj, nil
 }
 `
 
@@ -196,34 +245,60 @@ func (c *$.GroupGoName$$.Version$Client) RESTClient() $.restRESTClientInterface|
 	if c == nil {
 		return nil
 	}
-	return c.restClient
+
+	max := len(c.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return c.restClients[0]
+	}
+
+	$.ranSeed|raw$(time.Now().UnixNano())
+	ran := $.ranIntn|raw$(max)
+	return c.restClients[ran]
+}
+`
+
+var getRESTClients = `
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *$.GroupGoName$$.Version$Client) RESTClients() []$.restRESTClientInterface|raw$ {
+	if c == nil {
+		return nil
+	}
+
+	return c.restClients
 }
 `
 
 var newClientForRESTClientTemplate = `
 // New creates a new $.GroupGoName$$.Version$Client for the given RESTClient.
 func New(c $.restRESTClientInterface|raw$) *$.GroupGoName$$.Version$Client {
-	return &$.GroupGoName$$.Version$Client{c}
+	clients := []rest.Interface{c}
+	return &$.GroupGoName$$.Version$Client{restClients: clients}
 }
 `
 
 var setInternalVersionClientDefaultsTemplate = `
-func setConfigDefaults(config *$.restConfig|raw$) error {
-	config.APIPath = $.apiPath$
-	if config.UserAgent == "" {
-		config.UserAgent = $.restDefaultKubernetesUserAgent|raw$()
-	}
-	if config.GroupVersion == nil || config.GroupVersion.Group != scheme.Scheme.PrioritizedVersionsForGroup("$.groupName$")[0].Group {
-		gv := scheme.Scheme.PrioritizedVersionsForGroup("$.groupName$")[0]
-		config.GroupVersion = &gv
-	}
-	config.NegotiatedSerializer = scheme.Codecs
-
-	if config.QPS == 0 {
-		config.QPS = 5
-	}
-	if config.Burst == 0 {
-		config.Burst = 10
+func setConfigDefaults(configs *$.restConfig|raw$) error {
+	for _, config := range configs.GetAllConfigs() {
+		config.APIPath = $.apiPath$
+		if config.UserAgent == "" {
+			config.UserAgent = $.restDefaultKubernetesUserAgent|raw$()
+		}
+		if config.GroupVersion == nil || config.GroupVersion.Group != scheme.Scheme.PrioritizedVersionsForGroup("$.groupName$")[0].Group {
+			gv := scheme.Scheme.PrioritizedVersionsForGroup("$.groupName$")[0]
+			config.GroupVersion = &gv
+		}
+		config.NegotiatedSerializer = scheme.Codecs
+	
+		if config.QPS == 0 {
+			config.QPS = 5
+		}
+		if config.Burst == 0 {
+			config.Burst = 10
+		}
 	}
 
 	return nil
@@ -231,16 +306,45 @@ func setConfigDefaults(config *$.restConfig|raw$) error {
 `
 
 var setClientDefaultsTemplate = `
-func setConfigDefaults(config *$.restConfig|raw$) error {
+func setConfigDefaults(configs *$.restConfig|raw$) error {
 	gv := $.SchemeGroupVersion|raw$
-	config.GroupVersion =  &gv
-	config.APIPath = $.apiPath$
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = $.restDefaultKubernetesUserAgent|raw$()
+	for _, config := range configs.GetAllConfigs() {
+		config.GroupVersion =  &gv
+		config.APIPath = $.apiPath$
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+		
+		if config.UserAgent == "" {
+			config.UserAgent = $.restDefaultKubernetesUserAgent|raw$()
+		}
 	}
 
 	return nil
+}
+`
+
+var run = `
+// run watch api server instance updates and recreate connections to new set of api servers
+func (c *$.GroupGoName$$.Version$Client) run() {
+	go func(c *$.GroupGoName$$.Version$Client) {
+		member := c.configs.WatchUpdate()
+		watcherForUpdateComplete := $.getClientSetsWatcher|raw$()
+		watcherForUpdateComplete.AddWatcher()
+
+		for range member.Read {
+			// create new client
+			clients := make([]$.restRESTClientInterface|raw$, len(c.configs.GetAllConfigs()))
+			for i, config := range c.configs.GetAllConfigs() {
+				client, err := $.restRESTClientFor|raw$(config)
+				if err != nil {
+					$.klogFatal|raw$("Cannot create rest client for [%+v], err %v", config, err)
+					return
+				}
+				clients[i] = client
+			}
+			c.restClients = clients
+			watcherForUpdateComplete.NotifyDone()
+		}
+	}(c)
 }
 `

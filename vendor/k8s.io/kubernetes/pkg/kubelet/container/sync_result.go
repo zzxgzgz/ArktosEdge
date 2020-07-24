@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -62,6 +63,7 @@ const (
 	CreatePodSandbox SyncAction = "CreatePodSandbox"
 	ConfigPodSandbox SyncAction = "ConfigPodSandbox"
 	KillPodSandbox   SyncAction = "KillPodSandbox"
+	HotplugDevice    SyncAction = "HotplugDevice"
 )
 
 // SyncResult is the result of sync action.
@@ -116,11 +118,11 @@ func (p *PodSyncResult) Fail(err error) {
 func (p *PodSyncResult) Error() error {
 	errlist := []error{}
 	if p.SyncError != nil {
-		errlist = append(errlist, fmt.Errorf("failed to SyncPod: %v", p.SyncError))
+		errlist = append(errlist, fmt.Errorf("failed to SyncPod: %v\n", p.SyncError))
 	}
 	for _, result := range p.SyncResults {
 		if result.Error != nil {
-			errlist = append(errlist, fmt.Errorf("failed to %q for %q with %v: %q", result.Action, result.Target,
+			errlist = append(errlist, fmt.Errorf("failed to %q for %q with %v: %q\n", result.Action, result.Target,
 				result.Error, result.Message))
 		}
 	}

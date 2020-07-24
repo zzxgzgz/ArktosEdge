@@ -21,9 +21,8 @@ import (
 	"regexp"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -34,7 +33,6 @@ const (
 
 	// Parameter names defined in azure disk CSI driver, refer to
 	// https://github.com/kubernetes-sigs/azuredisk-csi-driver/blob/master/docs/driver-parameters.md
-	azureDiskKind        = "kind"
 	azureDiskCachingMode = "cachingMode"
 	azureDiskFSType      = "fsType"
 )
@@ -69,35 +67,25 @@ func (t *azureDiskCSITranslator) TranslateInTreeInlineVolumeToCSI(volume *v1.Vol
 
 	azureSource := volume.AzureDisk
 	pv := &v1.PersistentVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			// Must be unique per disk as it is used as the unique part of the
-			// staging path
-			Name: fmt.Sprintf("%s-%s", AzureDiskDriverName, azureSource.DiskName),
-		},
 		Spec: v1.PersistentVolumeSpec{
 			PersistentVolumeSource: v1.PersistentVolumeSource{
 				CSI: &v1.CSIPersistentVolumeSource{
 					Driver:           AzureDiskDriverName,
 					VolumeHandle:     azureSource.DataDiskURI,
-					VolumeAttributes: map[string]string{azureDiskKind: "Managed"},
+					ReadOnly:         *azureSource.ReadOnly,
+					FSType:           *azureSource.FSType,
+					VolumeAttributes: map[string]string{},
 				},
 			},
 			AccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
 		},
 	}
-	if azureSource.ReadOnly != nil {
-		pv.Spec.PersistentVolumeSource.CSI.ReadOnly = *azureSource.ReadOnly
-	}
 
-	if azureSource.CachingMode != nil && *azureSource.CachingMode != "" {
+	if *azureSource.CachingMode != "" {
 		pv.Spec.PersistentVolumeSource.CSI.VolumeAttributes[azureDiskCachingMode] = string(*azureSource.CachingMode)
 	}
-	if azureSource.FSType != nil {
-		pv.Spec.PersistentVolumeSource.CSI.FSType = *azureSource.FSType
+	if *azureSource.FSType != "" {
 		pv.Spec.PersistentVolumeSource.CSI.VolumeAttributes[azureDiskFSType] = *azureSource.FSType
-	}
-	if azureSource.Kind != nil {
-		pv.Spec.PersistentVolumeSource.CSI.VolumeAttributes[azureDiskKind] = string(*azureSource.Kind)
 	}
 
 	return pv, nil
@@ -118,19 +106,15 @@ func (t *azureDiskCSITranslator) TranslateInTreePVToCSI(pv *v1.PersistentVolume)
 		VolumeHandle:     azureSource.DataDiskURI,
 		ReadOnly:         *azureSource.ReadOnly,
 		FSType:           *azureSource.FSType,
-		VolumeAttributes: map[string]string{azureDiskKind: "Managed"},
+		VolumeAttributes: map[string]string{},
 	}
 
-	if azureSource.CachingMode != nil {
+	if *azureSource.CachingMode != "" {
 		csiSource.VolumeAttributes[azureDiskCachingMode] = string(*azureSource.CachingMode)
 	}
 
-	if azureSource.FSType != nil {
+	if *azureSource.FSType != "" {
 		csiSource.VolumeAttributes[azureDiskFSType] = *azureSource.FSType
-	}
-
-	if azureSource.Kind != nil {
-		csiSource.VolumeAttributes[azureDiskKind] = string(*azureSource.Kind)
 	}
 
 	pv.Spec.PersistentVolumeSource.AzureDisk = nil
@@ -155,13 +139,11 @@ func (t *azureDiskCSITranslator) TranslateCSIPVToInTree(pv *v1.PersistentVolume)
 	}
 
 	// refer to https://github.com/kubernetes-sigs/azuredisk-csi-driver/blob/master/docs/driver-parameters.md
-	managed := v1.AzureManagedDisk
 	azureSource := &v1.AzureDiskVolumeSource{
 		DiskName:    diskName,
 		DataDiskURI: diskURI,
 		FSType:      &csiSource.FSType,
 		ReadOnly:    &csiSource.ReadOnly,
-		Kind:        &managed,
 	}
 
 	if csiSource.VolumeAttributes != nil {
@@ -172,11 +154,6 @@ func (t *azureDiskCSITranslator) TranslateCSIPVToInTree(pv *v1.PersistentVolume)
 
 		if fsType, ok := csiSource.VolumeAttributes[azureDiskFSType]; ok && fsType != "" {
 			azureSource.FSType = &fsType
-		}
-
-		if kind, ok := csiSource.VolumeAttributes[azureDiskKind]; ok && kind != "" {
-			diskKind := v1.AzureDataDiskKind(kind)
-			azureSource.Kind = &diskKind
 		}
 	}
 
@@ -208,10 +185,6 @@ func (t *azureDiskCSITranslator) GetInTreePluginName() string {
 // GetCSIPluginName returns the name of the CSI plugin
 func (t *azureDiskCSITranslator) GetCSIPluginName() string {
 	return AzureDiskDriverName
-}
-
-func (t *azureDiskCSITranslator) RepairVolumeHandle(volumeHandle, nodeID string) (string, error) {
-	return volumeHandle, nil
 }
 
 func isManagedDisk(diskURI string) bool {

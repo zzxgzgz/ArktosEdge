@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package qos contains helper functions for quality of service.
+// package qos contains helper functions for quality of service.
 // For each resource (memory, CPU) Kubelet supports three classes of containers.
 // Memory guaranteed containers will receive the highest priority and will get all the resources
 // they need.

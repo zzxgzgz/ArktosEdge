@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,20 +18,26 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"encoding/json"
 	"fmt"
-	"net"
-	"net/url"
-	"sort"
-
 	"k8s.io/api/core/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/features"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util/format"
+	"net"
+	"net/url"
+	"sort"
+)
+
+const (
+	VPCKeyName  = "VPC"
+	NICsKeyName = "NICs"
 )
 
 // createPodSandbox creates a pod sandbox and returns (podSandBoxID, message, error).
@@ -62,13 +69,26 @@ func (m *kubeGenericRuntimeManager) createPodSandbox(pod *v1.Pod, attempt uint32
 		}
 	}
 
-	podSandBoxID, err := m.runtimeService.RunPodSandbox(podSandboxConfig, runtimeHandler)
+	// debugging dump the PodSandboxConfig
+	klog.V(6).Infof("PodSandboxConfig: %s", podSandboxConfig.String())
+
+	runtimeService, err := m.GetRuntimeServiceByPod(pod)
+	if err != nil {
+		message := fmt.Sprintf("GetRuntimeService for pod %q failed: %v", format.Pod(pod), err)
+		klog.Error(message)
+		return "", message, err
+	}
+
+	podSandBoxID, err := runtimeService.RunPodSandbox(podSandboxConfig, runtimeHandler)
+
 	if err != nil {
 		message := fmt.Sprintf("CreatePodSandbox for pod %q failed: %v", format.Pod(pod), err)
 		klog.Error(message)
 		return "", message, err
 	}
 
+	// add ppd-runtimeService cache
+	m.addPodRuntimeService(string(pod.UID), runtimeService)
 	return podSandBoxID, "", nil
 }
 
@@ -81,11 +101,32 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		Metadata: &runtimeapi.PodSandboxMetadata{
 			Name:      pod.Name,
 			Namespace: pod.Namespace,
+			Tenant:    pod.Tenant,
 			Uid:       podUID,
 			Attempt:   attempt,
 		},
 		Labels:      newPodLabels(pod),
 		Annotations: newPodAnnotations(pod),
+	}
+
+	// Arktos add VPC, NICs info as podspec, so add it to the SandboxConfig as annotations so the runtime service can use them
+	// TODO: if the podConverter is kept for long term in Arktos, consider consolidate the set annotation code with it
+	if podSandboxConfig.Annotations == nil {
+		podSandboxConfig.Annotations = make(map[string]string)
+	}
+	if pod.Spec.VPC != "" {
+		if _, found := podSandboxConfig.Annotations[VPCKeyName]; !found {
+			podSandboxConfig.Annotations[VPCKeyName] = pod.Spec.VPC
+		}
+	}
+	if pod.Spec.Nics != nil {
+		if _, found := podSandboxConfig.Annotations[NICsKeyName]; !found {
+			s, err := json.Marshal(pod.Spec.Nics)
+			if err != nil {
+				return nil, err
+			}
+			podSandboxConfig.Annotations[NICsKeyName] = string(s)
+		}
 	}
 
 	dnsConfig, err := m.runtimeHelper.GetPodDNS(pod)
@@ -103,7 +144,7 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 		podSandboxConfig.Hostname = hostname
 	}
 
-	logDir := BuildPodLogsDirectory(pod.Namespace, pod.Name, pod.UID)
+	logDir := BuildPodLogsDirectory(pod.Tenant, pod.Namespace, pod.Name, pod.UID)
 	podSandboxConfig.LogDirectory = logDir
 
 	portMappings := []*runtimeapi.PortMapping{}
@@ -195,6 +236,28 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxLinuxConfig(pod *v1.Pod) (
 
 // getKubeletSandboxes lists all (or just the running) sandboxes managed by kubelet.
 func (m *kubeGenericRuntimeManager) getKubeletSandboxes(all bool) ([]*runtimeapi.PodSandbox, error) {
+	runtimeServices, err := m.runtimeRegistry.GetAllRuntimeServices()
+	if err != nil {
+		klog.Errorf("GetAllRuntimeServices failed: %v", err)
+		return nil, err
+	}
+
+	var resps []*runtimeapi.PodSandbox
+
+	for _, runtimeService := range runtimeServices {
+		resp, err := m.getKubeletSandboxesByRuntime(runtimeService.ServiceApi, all)
+		if err != nil {
+			klog.Errorf("getKubeletSandboxesByRuntime failed: %v", err)
+			continue
+		}
+
+		resps = append(resps, resp...)
+	}
+
+	return resps, nil
+}
+
+func (m *kubeGenericRuntimeManager) getKubeletSandboxesByRuntime(runtimeService internalapi.RuntimeService, all bool) ([]*runtimeapi.PodSandbox, error) {
 	var filter *runtimeapi.PodSandboxFilter
 	if !all {
 		readyState := runtimeapi.PodSandboxState_SANDBOX_READY
@@ -205,7 +268,12 @@ func (m *kubeGenericRuntimeManager) getKubeletSandboxes(all bool) ([]*runtimeapi
 		}
 	}
 
-	resp, err := m.runtimeService.ListPodSandbox(filter)
+	if runtimeService == nil {
+		klog.Errorf("runtimeService is not initialized")
+		return nil, fmt.Errorf("runtimeService not initialized")
+	}
+
+	resp, err := runtimeService.ListPodSandbox(filter)
 	if err != nil {
 		klog.Errorf("ListPodSandbox failed: %v", err)
 		return nil, err
@@ -214,36 +282,20 @@ func (m *kubeGenericRuntimeManager) getKubeletSandboxes(all bool) ([]*runtimeapi
 	return resp, nil
 }
 
-// determinePodSandboxIP determines the IP addresses of the given pod sandbox.
-func (m *kubeGenericRuntimeManager) determinePodSandboxIPs(podNamespace, podName string, podSandbox *runtimeapi.PodSandboxStatus) []string {
-	podIPs := make([]string, 0)
+// determinePodSandboxIP determines the IP address of the given pod sandbox.
+func (m *kubeGenericRuntimeManager) determinePodSandboxIP(podTenant, podNamespace, podName string, podSandbox *runtimeapi.PodSandboxStatus) string {
 	if podSandbox.Network == nil {
-		klog.Warningf("Pod Sandbox status doesn't have network information, cannot report IPs")
-		return podIPs
+		klog.Warningf("Pod Sandbox status doesn't have network information, cannot report IP")
+		return ""
 	}
-
-	// ip could be an empty string if runtime is not responsible for the
-	// IP (e.g., host networking).
-
-	// pick primary IP
-	if len(podSandbox.Network.Ip) != 0 {
-		if net.ParseIP(podSandbox.Network.Ip) == nil {
-			klog.Warningf("Pod Sandbox reported an unparseable IP (Primary) %v", podSandbox.Network.Ip)
-			return nil
-		}
-		podIPs = append(podIPs, podSandbox.Network.Ip)
+	ip := podSandbox.Network.Ip
+	if len(ip) != 0 && net.ParseIP(ip) == nil {
+		// ip could be an empty string if runtime is not responsible for the
+		// IP (e.g., host networking).
+		klog.Warningf("Pod Sandbox reported an unparseable IP %v", ip)
+		return ""
 	}
-
-	// pick additional ips, if cri reported them
-	for _, podIP := range podSandbox.Network.AdditionalIps {
-		if nil == net.ParseIP(podIP.Ip) {
-			klog.Warningf("Pod Sandbox reported an unparseable IP (additional) %v", podIP.Ip)
-			return nil
-		}
-		podIPs = append(podIPs, podIP.Ip)
-	}
-
-	return podIPs
+	return ip
 }
 
 // getPodSandboxID gets the sandbox id by podUID and returns ([]sandboxID, error).
@@ -257,7 +309,13 @@ func (m *kubeGenericRuntimeManager) getSandboxIDByPodUID(podUID kubetypes.UID, s
 			State: *state,
 		}
 	}
-	sandboxes, err := m.runtimeService.ListPodSandbox(filter)
+
+	runtimeService, err := m.GetRuntimeServiceByPodID(podUID)
+	if err != nil {
+		return nil, err
+	}
+
+	sandboxes, err := runtimeService.ListPodSandbox(filter)
 	if err != nil {
 		klog.Errorf("ListPodSandbox with pod UID %q failed: %v", podUID, err)
 		return nil, err
@@ -278,19 +336,24 @@ func (m *kubeGenericRuntimeManager) getSandboxIDByPodUID(podUID kubetypes.UID, s
 }
 
 // GetPortForward gets the endpoint the runtime will serve the port-forward request from.
-func (m *kubeGenericRuntimeManager) GetPortForward(podName, podNamespace string, podUID kubetypes.UID, ports []int32) (*url.URL, error) {
+func (m *kubeGenericRuntimeManager) GetPortForward(podName, podNamespace, podTenant string, podUID kubetypes.UID, ports []int32) (*url.URL, error) {
 	sandboxIDs, err := m.getSandboxIDByPodUID(podUID, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find sandboxID for pod %s: %v", format.PodDesc(podName, podNamespace, podUID), err)
+		return nil, fmt.Errorf("failed to find sandboxID for pod %s: %v", format.PodDesc(podName, podNamespace, podTenant, podUID), err)
 	}
 	if len(sandboxIDs) == 0 {
-		return nil, fmt.Errorf("failed to find sandboxID for pod %s", format.PodDesc(podName, podNamespace, podUID))
+		return nil, fmt.Errorf("failed to find sandboxID for pod %s", format.PodDesc(podName, podNamespace, podTenant, podUID))
 	}
 	req := &runtimeapi.PortForwardRequest{
 		PodSandboxId: sandboxIDs[0],
 		Port:         ports,
 	}
-	resp, err := m.runtimeService.PortForward(req)
+
+	runtimeService, err := m.GetRuntimeServiceByPodID(podUID)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := runtimeService.PortForward(req)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type LeaseLister interface {
 	List(selector labels.Selector) (ret []*v1beta1.Lease, err error)
 	// Leases returns an object that can list and get Leases.
 	Leases(namespace string) LeaseNamespaceLister
+	LeasesWithMultiTenancy(namespace string, tenant string) LeaseNamespaceLister
 	LeaseListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *leaseLister) List(selector labels.Selector) (ret []*v1beta1.Lease, err 
 
 // Leases returns an object that can list and get Leases.
 func (s *leaseLister) Leases(namespace string) LeaseNamespaceLister {
-	return leaseNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return leaseNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *leaseLister) LeasesWithMultiTenancy(namespace string, tenant string) LeaseNamespaceLister {
+	return leaseNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // LeaseNamespaceLister helps list and get Leases.
 type LeaseNamespaceLister interface {
-	// List lists all Leases in the indexer for a given namespace.
+	// List lists all Leases in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1beta1.Lease, err error)
-	// Get retrieves the Lease from the indexer for a given namespace and name.
+	// Get retrieves the Lease from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1beta1.Lease, error)
 	LeaseNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type LeaseNamespaceLister interface {
 type leaseNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all Leases in the indexer for a given namespace.
 func (s leaseNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.Lease, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1beta1.Lease))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s leaseNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.Lea
 
 // Get retrieves the Lease from the indexer for a given namespace and name.
 func (s leaseNamespaceLister) Get(name string) (*v1beta1.Lease, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

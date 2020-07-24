@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -185,11 +186,8 @@ func (c *assumeCache) add(obj interface{}) {
 	}
 
 	objInfo := &objInfo{name: name, latestObj: obj, apiObj: obj}
-	if err = c.store.Update(objInfo); err != nil {
-		klog.Warningf("got error when updating stored object : %v", err)
-	} else {
-		klog.V(10).Infof("Adding %v %v to assume cache: %+v ", c.description, name, obj)
-	}
+	c.store.Update(objInfo)
+	klog.V(10).Infof("Added %v %v to assume cache: %+v ", c.description, name, obj)
 }
 
 func (c *assumeCache) update(oldObj interface{}, newObj interface{}) {

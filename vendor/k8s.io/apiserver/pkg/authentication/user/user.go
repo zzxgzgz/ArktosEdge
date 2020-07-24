@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,6 +16,8 @@ limitations under the License.
 */
 
 package user
+
+import "strings"
 
 // Info describes a user that has been authenticated to the system.
 type Info interface {
@@ -39,6 +42,8 @@ type Info interface {
 	// In order to faithfully round-trip through an impersonation flow, these keys
 	// MUST be lowercase.
 	GetExtra() map[string][]string
+
+	GetTenant() string
 }
 
 // DefaultInfo provides a simple user information exchange object
@@ -48,6 +53,7 @@ type DefaultInfo struct {
 	UID    string
 	Groups []string
 	Extra  map[string][]string
+	Tenant string
 }
 
 func (i *DefaultInfo) GetName() string {
@@ -66,6 +72,20 @@ func (i *DefaultInfo) GetExtra() map[string][]string {
 	return i.Extra
 }
 
+func (i *DefaultInfo) GetTenant() string {
+	if i.Tenant != "" {
+		return i.Tenant
+	}
+
+	parts := strings.Split(i.Name, ":")
+
+	if len(parts) < 2 {
+		return ""
+	} else {
+		return parts[0]
+	}
+}
+
 // well-known user and group names
 const (
 	SystemPrivilegedGroup = "system:masters"
@@ -77,7 +97,8 @@ const (
 	APIServerUser = "system:apiserver"
 
 	// core kubernetes process identities
-	KubeProxy             = "system:kube-proxy"
-	KubeControllerManager = "system:kube-controller-manager"
-	KubeScheduler         = "system:kube-scheduler"
+	KubeProxy                 = "system:kube-proxy"
+	KubeControllerManager     = "system:kube-controller-manager"
+	WorkloadControllerManager = "system:workload-controller-manager"
+	KubeScheduler             = "system:kube-scheduler"
 )

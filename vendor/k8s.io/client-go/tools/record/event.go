@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -127,28 +128,6 @@ type EventBroadcaster interface {
 	// NewRecorder returns an EventRecorder that can be used to send events to this EventBroadcaster
 	// with the event source set to the given event source.
 	NewRecorder(scheme *runtime.Scheme, source v1.EventSource) EventRecorder
-
-	// Shutdown shuts down the broadcaster
-	Shutdown()
-}
-
-// EventRecorderAdapter is a wrapper around a "k8s.io/client-go/tools/record".EventRecorder
-// implementing the new "k8s.io/client-go/tools/events".EventRecorder interface.
-type EventRecorderAdapter struct {
-	recorder EventRecorder
-}
-
-// NewEventRecorderAdapter returns an adapter implementing the new
-// "k8s.io/client-go/tools/events".EventRecorder interface.
-func NewEventRecorderAdapter(recorder EventRecorder) *EventRecorderAdapter {
-	return &EventRecorderAdapter{
-		recorder: recorder,
-	}
-}
-
-// Eventf is a wrapper around v1 Eventf
-func (a *EventRecorderAdapter) Eventf(regarding, _ runtime.Object, eventtype, reason, action, note string, args ...interface{}) {
-	a.recorder.Eventf(regarding, eventtype, reason, note, args...)
 }
 
 // Creates a new event broadcaster.
@@ -183,19 +162,18 @@ type eventBroadcasterImpl struct {
 // StartRecordingToSink starts sending events received from the specified eventBroadcaster to the given sink.
 // The return value can be ignored or used to stop recording, if desired.
 // TODO: make me an object with parameterizable queue length and retry interval
-func (e *eventBroadcasterImpl) StartRecordingToSink(sink EventSink) watch.Interface {
-	eventCorrelator := NewEventCorrelatorWithOptions(e.options)
-	return e.StartEventWatcher(
+func (eventBroadcaster *eventBroadcasterImpl) StartRecordingToSink(sink EventSink) watch.Interface {
+	// The default math/rand package functions aren't thread safe, so create a
+	// new Rand object for each StartRecording call.
+	randGen := rand.New(rand.NewSource(time.Now().UnixNano()))
+	eventCorrelator := NewEventCorrelatorWithOptions(eventBroadcaster.options)
+	return eventBroadcaster.StartEventWatcher(
 		func(event *v1.Event) {
-			recordToSink(sink, event, eventCorrelator, e.sleepDuration)
+			recordToSink(sink, event, eventCorrelator, randGen, eventBroadcaster.sleepDuration)
 		})
 }
 
-func (e *eventBroadcasterImpl) Shutdown() {
-	e.Broadcaster.Shutdown()
-}
-
-func recordToSink(sink EventSink, event *v1.Event, eventCorrelator *EventCorrelator, sleepDuration time.Duration) {
+func recordToSink(sink EventSink, event *v1.Event, eventCorrelator *EventCorrelator, randGen *rand.Rand, sleepDuration time.Duration) {
 	// Make a copy before modification, because there could be multiple listeners.
 	// Events are safe to copy like this.
 	eventCopy := *event
@@ -220,7 +198,7 @@ func recordToSink(sink EventSink, event *v1.Event, eventCorrelator *EventCorrela
 		// Randomize the first sleep so that various clients won't all be
 		// synced up if the master goes down.
 		if tries == 1 {
-			time.Sleep(time.Duration(float64(sleepDuration) * rand.Float64()))
+			time.Sleep(time.Duration(float64(sleepDuration) * randGen.Float64()))
 		} else {
 			time.Sleep(sleepDuration)
 		}
@@ -275,8 +253,8 @@ func recordEvent(sink EventSink, event *v1.Event, patch []byte, updateExistingEv
 
 // StartLogging starts sending events received from this EventBroadcaster to the given logging function.
 // The return value can be ignored or used to stop recording, if desired.
-func (e *eventBroadcasterImpl) StartLogging(logf func(format string, args ...interface{})) watch.Interface {
-	return e.StartEventWatcher(
+func (eventBroadcaster *eventBroadcasterImpl) StartLogging(logf func(format string, args ...interface{})) watch.Interface {
+	return eventBroadcaster.StartEventWatcher(
 		func(e *v1.Event) {
 			logf("Event(%#v): type: '%v' reason: '%v' %v", e.InvolvedObject, e.Type, e.Reason, e.Message)
 		})
@@ -284,8 +262,8 @@ func (e *eventBroadcasterImpl) StartLogging(logf func(format string, args ...int
 
 // StartEventWatcher starts sending events received from this EventBroadcaster to the given event handler function.
 // The return value can be ignored or used to stop recording, if desired.
-func (e *eventBroadcasterImpl) StartEventWatcher(eventHandler func(*v1.Event)) watch.Interface {
-	watcher := e.Watch()
+func (eventBroadcaster *eventBroadcasterImpl) StartEventWatcher(eventHandler func(*v1.Event)) watch.Interface {
+	watcher := eventBroadcaster.Watch()
 	go func() {
 		defer utilruntime.HandleCrash()
 		for watchEvent := range watcher.ResultChan() {
@@ -302,8 +280,8 @@ func (e *eventBroadcasterImpl) StartEventWatcher(eventHandler func(*v1.Event)) w
 }
 
 // NewRecorder returns an EventRecorder that records events with the given event source.
-func (e *eventBroadcasterImpl) NewRecorder(scheme *runtime.Scheme, source v1.EventSource) EventRecorder {
-	return &recorderImpl{scheme, source, e.Broadcaster, clock.RealClock{}}
+func (eventBroadcaster *eventBroadcasterImpl) NewRecorder(scheme *runtime.Scheme, source v1.EventSource) EventRecorder {
+	return &recorderImpl{scheme, source, eventBroadcaster.Broadcaster, clock.RealClock{}}
 }
 
 type recorderImpl struct {
@@ -353,6 +331,10 @@ func (recorder *recorderImpl) AnnotatedEventf(object runtime.Object, annotations
 
 func (recorder *recorderImpl) makeEvent(ref *v1.ObjectReference, annotations map[string]string, eventtype, reason, message string) *v1.Event {
 	t := metav1.Time{Time: recorder.clock.Now()}
+	tenant := ref.Tenant
+	if tenant == "" {
+		tenant = metav1.TenantSystem
+	}
 	namespace := ref.Namespace
 	if namespace == "" {
 		namespace = metav1.NamespaceDefault
@@ -361,6 +343,7 @@ func (recorder *recorderImpl) makeEvent(ref *v1.ObjectReference, annotations map
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        fmt.Sprintf("%v.%x", ref.Name, t.UnixNano()),
 			Namespace:   namespace,
+			Tenant:      tenant,
 			Annotations: annotations,
 		},
 		InvolvedObject: *ref,

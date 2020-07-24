@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type IngressLister interface {
 	List(selector labels.Selector) (ret []*v1beta1.Ingress, err error)
 	// Ingresses returns an object that can list and get Ingresses.
 	Ingresses(namespace string) IngressNamespaceLister
+	IngressesWithMultiTenancy(namespace string, tenant string) IngressNamespaceLister
 	IngressListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *ingressLister) List(selector labels.Selector) (ret []*v1beta1.Ingress, 
 
 // Ingresses returns an object that can list and get Ingresses.
 func (s *ingressLister) Ingresses(namespace string) IngressNamespaceLister {
-	return ingressNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return ingressNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *ingressLister) IngressesWithMultiTenancy(namespace string, tenant string) IngressNamespaceLister {
+	return ingressNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // IngressNamespaceLister helps list and get Ingresses.
 type IngressNamespaceLister interface {
-	// List lists all Ingresses in the indexer for a given namespace.
+	// List lists all Ingresses in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1beta1.Ingress, err error)
-	// Get retrieves the Ingress from the indexer for a given namespace and name.
+	// Get retrieves the Ingress from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1beta1.Ingress, error)
 	IngressNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type IngressNamespaceLister interface {
 type ingressNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all Ingresses in the indexer for a given namespace.
 func (s ingressNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.Ingress, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1beta1.Ingress))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s ingressNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.I
 
 // Get retrieves the Ingress from the indexer for a given namespace and name.
 func (s ingressNamespaceLister) Get(name string) (*v1beta1.Ingress, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,17 +18,11 @@ limitations under the License.
 package fake
 
 import (
-	"context"
-
 	authorizationapi "k8s.io/api/authorization/v1beta1"
 	core "k8s.io/client-go/testing"
 )
 
 func (c *FakeLocalSubjectAccessReviews) Create(sar *authorizationapi.LocalSubjectAccessReview) (result *authorizationapi.LocalSubjectAccessReview, err error) {
-	return c.CreateContext(context.Background(), sar)
-}
-
-func (c *FakeLocalSubjectAccessReviews) CreateContext(ctx context.Context, sar *authorizationapi.LocalSubjectAccessReview) (result *authorizationapi.LocalSubjectAccessReview, err error) {
-	obj, err := c.Fake.Invokes(core.NewCreateAction(authorizationapi.SchemeGroupVersion.WithResource("localsubjectaccessreviews"), c.ns, sar), &authorizationapi.SubjectAccessReview{})
+	obj, err := c.Fake.Invokes(core.NewCreateActionWithMultiTenancy(authorizationapi.SchemeGroupVersion.WithResource("localsubjectaccessreviews"), c.ns, sar, c.te), &authorizationapi.SubjectAccessReview{})
 	return obj.(*authorizationapi.LocalSubjectAccessReview), err
 }

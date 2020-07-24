@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,12 +40,8 @@ func Resource(resource string) schema.GroupResource {
 }
 
 var (
-	// SchemeBuilder object to register various known types
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
-
-	// AddToScheme represents a func that can be used to apply all the registered
-	// funcs in a scheme
-	AddToScheme = SchemeBuilder.AddToScheme
+	AddToScheme   = SchemeBuilder.AddToScheme
 )
 
 func addKnownTypes(scheme *runtime.Scheme) error {
@@ -75,8 +72,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LimitRangeList{},
 		&ResourceQuota{},
 		&ResourceQuotaList{},
+		&StorageCluster{},
+		&StorageClusterList{},
+		&Tenant{},
+		&TenantList{},
 		&Namespace{},
 		&NamespaceList{},
+		&ControllerInstance{},
+		&ControllerInstanceList{},
 		&ServiceAccount{},
 		&ServiceAccountList{},
 		&Secret{},
@@ -96,7 +99,11 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&RangeAllocation{},
 		&ConfigMap{},
 		&ConfigMapList{},
-		&EphemeralContainers{},
+		&CustomAction{},
+		&Action{},
+		&ActionList{},
+		&DataPartitionConfig{},
+		&DataPartitionConfigList{},
 	)
 
 	return nil

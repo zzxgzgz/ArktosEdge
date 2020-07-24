@@ -272,13 +272,6 @@ func IsNotSupported(err error) bool {
 		err == ErrVmcomputeUnknownMessage
 }
 
-// IsOperationInvalidState returns true when err is caused by
-// `ErrVmcomputeOperationInvalidState`.
-func IsOperationInvalidState(err error) bool {
-	err = getInnerError(err)
-	return err == ErrVmcomputeOperationInvalidState
-}
-
 func getInnerError(err error) error {
 	switch pe := err.(type) {
 	case nil:

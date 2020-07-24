@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type ServiceLister interface {
 	List(selector labels.Selector) (ret []*v1.Service, err error)
 	// Services returns an object that can list and get Services.
 	Services(namespace string) ServiceNamespaceLister
+	ServicesWithMultiTenancy(namespace string, tenant string) ServiceNamespaceLister
 	ServiceListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *serviceLister) List(selector labels.Selector) (ret []*v1.Service, err e
 
 // Services returns an object that can list and get Services.
 func (s *serviceLister) Services(namespace string) ServiceNamespaceLister {
-	return serviceNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return serviceNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *serviceLister) ServicesWithMultiTenancy(namespace string, tenant string) ServiceNamespaceLister {
+	return serviceNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // ServiceNamespaceLister helps list and get Services.
 type ServiceNamespaceLister interface {
-	// List lists all Services in the indexer for a given namespace.
+	// List lists all Services in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.Service, err error)
-	// Get retrieves the Service from the indexer for a given namespace and name.
+	// Get retrieves the Service from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.Service, error)
 	ServiceNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type ServiceNamespaceLister interface {
 type serviceNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all Services in the indexer for a given namespace.
 func (s serviceNamespaceLister) List(selector labels.Selector) (ret []*v1.Service, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.Service))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s serviceNamespaceLister) List(selector labels.Selector) (ret []*v1.Servic
 
 // Get retrieves the Service from the indexer for a given namespace and name.
 func (s serviceNamespaceLister) Get(name string) (*v1.Service, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

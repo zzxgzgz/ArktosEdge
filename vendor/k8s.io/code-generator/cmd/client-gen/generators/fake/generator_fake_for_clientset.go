@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -127,7 +128,8 @@ func NewSimpleClientset(objects ...runtime.Object) *Clientset {
 	cs.AddWatchReactor("*", func(action testing.Action) (handled bool, ret watch.Interface, err error) {
 		gvr := action.GetResource()
 		ns := action.GetNamespace()
-		watch, err := o.Watch(gvr, ns)
+		te := action.GetTenant()
+		watch, err := o.WatchWithMultiTenancy(gvr, ns, te)
 		if err != nil {
 			return false, nil, err
 		}
@@ -162,6 +164,13 @@ var _ clientset.Interface = &Clientset{}
 var clientsetInterfaceImplTemplate = `
 // $.GroupGoName$$.Version$ retrieves the $.GroupGoName$$.Version$Client
 func (c *Clientset) $.GroupGoName$$.Version$() $.PackageAlias$.$.GroupGoName$$.Version$Interface {
+	return &fake$.PackageAlias$.Fake$.GroupGoName$$.Version${Fake: &c.Fake}
+}
+`
+
+var clientsetInterfaceDefaultVersionImpl = `
+// $.GroupGoName$ retrieves the $.GroupGoName$$.Version$Client
+func (c *Clientset) $.GroupGoName$() $.PackageAlias$.$.GroupGoName$$.Version$Interface {
 	return &fake$.PackageAlias$.Fake$.GroupGoName$$.Version${Fake: &c.Fake}
 }
 `

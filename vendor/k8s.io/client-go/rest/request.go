@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,8 +49,7 @@ import (
 
 var (
 	// longThrottleLatency defines threshold for logging requests. All requests being
-	// throttled (via the provided rateLimiter) for more than longThrottleLatency will
-	// be logged.
+	// throttle for more than longThrottleLatency will be logged.
 	longThrottleLatency = 50 * time.Millisecond
 )
 
@@ -75,31 +75,33 @@ func (r *RequestConstructionError) Error() string {
 	return fmt.Sprintf("request construction error: '%v'", r.Err)
 }
 
-var noBackoff = &NoBackoff{}
-
 // Request allows for building up a request to a server in a chained fashion.
 // Any errors are stored until the end of your call, so you only have to
 // check once.
 type Request struct {
-	c *RESTClient
+	// required
+	client HTTPClient
+	verb   string
 
-	rateLimiter flowcontrol.RateLimiter
-	backoff     BackoffManager
-	timeout     time.Duration
+	baseURL     *url.URL
+	content     ContentConfig
+	serializers Serializers
 
 	// generic components accessible via method setters
-	verb       string
 	pathPrefix string
 	subpath    string
 	params     url.Values
 	headers    http.Header
 
 	// structural elements of the request that are part of the Kubernetes API conventions
+	tenant       string
+	tenantSet    bool
 	namespace    string
 	namespaceSet bool
 	resource     string
 	resourceName string
 	subresource  string
+	timeout      time.Duration
 
 	// output
 	err  error
@@ -107,60 +109,39 @@ type Request struct {
 
 	// This is only used for per-request timeouts, deadlines, and cancellations.
 	ctx context.Context
+
+	backoffMgr BackoffManager
+	throttle   flowcontrol.RateLimiter
 }
 
 // NewRequest creates a new request helper object for accessing runtime.Objects on a server.
-func NewRequest(c *RESTClient) *Request {
-	var backoff BackoffManager
-	if c.createBackoffMgr != nil {
-		backoff = c.createBackoffMgr()
-	}
+func NewRequest(client HTTPClient, verb string, baseURL *url.URL, versionedAPIPath string, content ContentConfig, serializers Serializers, backoff BackoffManager, throttle flowcontrol.RateLimiter, timeout time.Duration) *Request {
 	if backoff == nil {
-		backoff = noBackoff
+		klog.V(2).Infof("Not implementing request backoff strategy.")
+		backoff = &NoBackoff{}
 	}
 
-	var pathPrefix string
-	if c.base != nil {
-		pathPrefix = path.Join("/", c.base.Path, c.versionedAPIPath)
-	} else {
-		pathPrefix = path.Join("/", c.versionedAPIPath)
+	pathPrefix := "/"
+	if baseURL != nil {
+		pathPrefix = path.Join(pathPrefix, baseURL.Path)
 	}
-
-	var timeout time.Duration
-	if c.Client != nil {
-		timeout = c.Client.Timeout
-	}
-
 	r := &Request{
-		c:           c,
-		rateLimiter: c.rateLimiter,
-		backoff:     backoff,
+		client:      client,
+		verb:        verb,
+		baseURL:     baseURL,
+		pathPrefix:  path.Join(pathPrefix, versionedAPIPath),
+		content:     content,
+		serializers: serializers,
+		backoffMgr:  backoff,
+		throttle:    throttle,
 		timeout:     timeout,
-		pathPrefix:  pathPrefix,
 	}
-
 	switch {
-	case len(c.content.AcceptContentTypes) > 0:
-		r.SetHeader("Accept", c.content.AcceptContentTypes)
-	case len(c.content.ContentType) > 0:
-		r.SetHeader("Accept", c.content.ContentType+", */*")
+	case len(content.AcceptContentTypes) > 0:
+		r.SetHeader("Accept", content.AcceptContentTypes)
+	case len(content.ContentType) > 0:
+		r.SetHeader("Accept", content.ContentType+", */*")
 	}
-	return r
-}
-
-// NewRequestWithClient creates a Request with an embedded RESTClient for use in test scenarios.
-func NewRequestWithClient(base *url.URL, versionedAPIPath string, content ClientContentConfig, client *http.Client) *Request {
-	return NewRequest(&RESTClient{
-		base:             base,
-		versionedAPIPath: versionedAPIPath,
-		content:          content,
-		Client:           client,
-	})
-}
-
-// Verb sets the verb this request will use.
-func (r *Request) Verb(verb string) *Request {
-	r.verb = verb
 	return r
 }
 
@@ -176,7 +157,7 @@ func (r *Request) Prefix(segments ...string) *Request {
 }
 
 // Suffix appends segments to the end of the path. These items will be placed after the prefix and optional
-// Namespace, Resource, or Name sections.
+// Tenant, Namespace, Resource, or Name sections.
 func (r *Request) Suffix(segments ...string) *Request {
 	if r.err != nil {
 		return r
@@ -206,17 +187,17 @@ func (r *Request) Resource(resource string) *Request {
 // or defaults to the stub implementation if nil is provided
 func (r *Request) BackOff(manager BackoffManager) *Request {
 	if manager == nil {
-		r.backoff = &NoBackoff{}
+		r.backoffMgr = &NoBackoff{}
 		return r
 	}
 
-	r.backoff = manager
+	r.backoffMgr = manager
 	return r
 }
 
 // Throttle receives a rate-limiter and sets or replaces an existing request limiter
 func (r *Request) Throttle(limiter flowcontrol.RateLimiter) *Request {
-	r.rateLimiter = limiter
+	r.throttle = limiter
 	return r
 }
 
@@ -280,10 +261,37 @@ func (r *Request) Namespace(namespace string) *Request {
 	return r
 }
 
+// Tenant applies the tenant scope to a request (<resource>/[ns/<tenant>/]<name>)
+func (r *Request) Tenant(tenant string) *Request {
+	if r.err != nil {
+		return r
+	}
+	if r.tenantSet {
+		r.err = fmt.Errorf("tenant already set to %q, cannot change to %q", r.tenant, tenant)
+		return r
+	}
+	if msgs := IsValidPathSegmentName(tenant); len(msgs) != 0 {
+		r.err = fmt.Errorf("invalid tenant %q: %v", tenant, msgs)
+		return r
+	}
+	r.tenantSet = true
+	r.tenant = tenant
+	return r
+}
+
 // NamespaceIfScoped is a convenience function to set a namespace if scoped is true
 func (r *Request) NamespaceIfScoped(namespace string, scoped bool) *Request {
 	if scoped {
 		return r.Namespace(namespace)
+	}
+	return r
+}
+
+// TenantIfScoped is a convenience function to set a tenant if scoped is true
+func (r *Request) TenantIfScoped(tenant string, scoped bool) *Request {
+	if scoped {
+		r = r.Tenant(tenant)
+		return r
 	}
 	return r
 }
@@ -294,11 +302,12 @@ func (r *Request) AbsPath(segments ...string) *Request {
 	if r.err != nil {
 		return r
 	}
-	r.pathPrefix = path.Join(r.c.base.Path, path.Join(segments...))
-	if len(segments) == 1 && (len(r.c.base.Path) > 1 || len(segments[0]) > 1) && strings.HasSuffix(segments[0], "/") {
+	r.pathPrefix = path.Join(r.baseURL.Path, path.Join(segments...))
+	if len(segments) == 1 && (len(r.baseURL.Path) > 1 || len(segments[0]) > 1) && strings.HasSuffix(segments[0], "/") {
 		// preserve any trailing slashes for legacy behavior
 		r.pathPrefix += "/"
 	}
+
 	return r
 }
 
@@ -339,7 +348,7 @@ func (r *Request) Param(paramName, s string) *Request {
 // VersionedParams will not write query parameters that have omitempty set and are empty. If a
 // parameter has already been set it is appended to (Params and VersionedParams are additive).
 func (r *Request) VersionedParams(obj runtime.Object, codec runtime.ParameterCodec) *Request {
-	return r.SpecificallyVersionedParams(obj, codec, r.c.content.GroupVersion)
+	return r.SpecificallyVersionedParams(obj, codec, *r.content.GroupVersion)
 }
 
 func (r *Request) SpecificallyVersionedParams(obj runtime.Object, codec runtime.ParameterCodec, version schema.GroupVersion) *Request {
@@ -419,19 +428,14 @@ func (r *Request) Body(obj interface{}) *Request {
 		if reflect.ValueOf(t).IsNil() {
 			return r
 		}
-		encoder, err := r.c.content.Negotiator.Encoder(r.c.content.ContentType, nil)
-		if err != nil {
-			r.err = err
-			return r
-		}
-		data, err := runtime.Encode(encoder, t)
+		data, err := runtime.Encode(r.serializers.Encoder, t)
 		if err != nil {
 			r.err = err
 			return r
 		}
 		glogBody("Request Body", data)
 		r.body = bytes.NewReader(data)
-		r.SetHeader("Content-Type", r.c.content.ContentType)
+		r.SetHeader("Content-Type", r.content.ContentType)
 	default:
 		r.err = fmt.Errorf("unknown type used for body: %+v", obj)
 	}
@@ -448,6 +452,9 @@ func (r *Request) Context(ctx context.Context) *Request {
 // URL returns the current working URL.
 func (r *Request) URL() *url.URL {
 	p := r.pathPrefix
+	if r.tenantSet && len(r.tenant) > 0 {
+		p = path.Join(p, "tenants", r.tenant)
+	}
 	if r.namespaceSet && len(r.namespace) > 0 {
 		p = path.Join(p, "namespaces", r.namespace)
 	}
@@ -460,8 +467,8 @@ func (r *Request) URL() *url.URL {
 	}
 
 	finalURL := &url.URL{}
-	if r.c.base != nil {
-		*finalURL = *r.c.base
+	if r.baseURL != nil {
+		*finalURL = *r.baseURL
 	}
 	finalURL.Path = p
 
@@ -495,8 +502,8 @@ func (r Request) finalURLTemplate() url.URL {
 	segments := strings.Split(r.URL().Path, "/")
 	groupIndex := 0
 	index := 0
-	if r.URL() != nil && r.c.base != nil && strings.Contains(r.URL().Path, r.c.base.Path) {
-		groupIndex += len(strings.Split(r.c.base.Path, "/"))
+	if r.URL() != nil && r.baseURL != nil && strings.Contains(r.URL().Path, r.baseURL.Path) {
+		groupIndex += len(strings.Split(r.baseURL.Path, "/"))
 	}
 	if groupIndex >= len(segments) {
 		return *url
@@ -521,10 +528,11 @@ func (r Request) finalURLTemplate() url.URL {
 		url.RawQuery = ""
 		return *url
 	}
+
 	//switch segLength := len(segments) - index; segLength {
 	switch {
-	// case len(segments) - index == 1:
-	// resource (with no name) do nothing
+	case len(segments)-index == 1:
+		// resource (with no name) do nothing
 	case len(segments)-index == 2:
 		// /$RESOURCE/$NAME: replace $NAME with {name}
 		segments[index+1] = "{name}"
@@ -533,48 +541,89 @@ func (r Request) finalURLTemplate() url.URL {
 			// /$RESOURCE/$NAME/$SUBRESOURCE: replace $NAME with {name}
 			segments[index+1] = "{name}"
 		} else {
-			// /namespace/$NAMESPACE/$RESOURCE: replace $NAMESPACE with {namespace}
-			segments[index+1] = "{namespace}"
+			// /namespaces/$NAMESPACE/$RESOURCE: replace $NAMESPACE with {namespace}
+			// /tenants/$TENANT/$RESOURCE: replace $TENANT with {tenant}
+			if segments[index] == "namespaces" {
+				segments[index+1] = "{namespace}"
+			}
+			if segments[index] == "tenants" {
+				segments[index+1] = "{tenant}"
+
+			}
 		}
 	case len(segments)-index >= 4:
-		segments[index+1] = "{namespace}"
-		// /namespace/$NAMESPACE/$RESOURCE/$NAME: replace $NAMESPACE with {namespace},  $NAME with {name}
+		if segments[index] == "namespaces" {
+			segments[index+1] = "{namespace}"
+		}
+
+		if segments[index] == "tenants" {
+			segments[index+1] = "{tenant}"
+		}
+		// /namespaces/$NAMESPACE/$RESOURCE/$NAME: replace $NAMESPACE with {namespace},  $NAME with {name}
 		if segments[index+3] != "finalize" && segments[index+3] != "status" {
 			// /$RESOURCE/$NAME/$SUBRESOURCE: replace $NAME with {name}
 			segments[index+3] = "{name}"
 		}
+	case len(segments)-index >= 5:
+		// /tenants/$TENANT/namespaces/$NAMESPACE/$RESOURCE: replace $NAMESPACE with {namespace}
+		// replace $TENANT with {tenant}
+
+		if segments[index] == "namespaces" {
+			segments[index+1] = "{namespace}"
+			if segments[index+3] != "finalize" && segments[index+3] != "status" {
+				// /$RESOURCE/$NAME/$SUBRESOURCE: replace $NAME with {name}
+				segments[index+3] = "{name}"
+			}
+		}
+		if segments[index] == "tenants" {
+			segments[index+1] = "{tenant}"
+			if segments[index+2] == "namespaces" {
+				segments[index+3] = "{namespace}"
+			} else if segments[index+3] != "finalize" && segments[index+3] != "status" {
+				// /$RESOURCE/$NAME/$SUBRESOURCE: replace $NAME with {name}
+				segments[index+3] = "{name}"
+			}
+		}
 	}
+
 	url.Path = path.Join(segments...)
 	return *url
 }
 
-func (r *Request) tryThrottle() error {
-	if r.rateLimiter == nil {
-		return nil
-	}
-
+func (r *Request) tryThrottle() {
 	now := time.Now()
-	var err error
-	if r.ctx != nil {
-		err = r.rateLimiter.Wait(r.ctx)
-	} else {
-		r.rateLimiter.Accept()
+	if r.throttle != nil {
+		r.throttle.Accept()
 	}
-
 	if latency := time.Since(now); latency > longThrottleLatency {
 		klog.V(4).Infof("Throttling request took %v, request: %s:%s", latency, r.verb, r.URL().String())
 	}
-
-	return err
 }
 
 // Watch attempts to begin watching the requested location.
 // Returns a watch.Interface, or an error.
 func (r *Request) Watch() (watch.Interface, error) {
+	return r.WatchWithSpecificDecoders(
+		func(body io.ReadCloser) streaming.Decoder {
+			framer := r.serializers.Framer.NewFrameReader(body)
+			return streaming.NewDecoder(framer, r.serializers.StreamingSerializer)
+		},
+		r.serializers.Decoder,
+	)
+}
+
+// WatchWithSpecificDecoders attempts to begin watching the requested location with a *different* decoder.
+// Turns out that you want one "standard" decoder for the watch event and one "personal" decoder for the content
+// Returns a watch.Interface, or an error.
+func (r *Request) WatchWithSpecificDecoders(wrapperDecoderFn func(io.ReadCloser) streaming.Decoder, embeddedDecoder runtime.Decoder) (watch.Interface, error) {
 	// We specifically don't want to rate limit watches, so we
-	// don't use r.rateLimiter here.
+	// don't use r.throttle here.
+
 	if r.err != nil {
 		return nil, r.err
+	}
+	if r.serializers.Framer == nil {
+		return nil, fmt.Errorf("watching resources is not possible with this client (content-type: %s)", r.content.ContentType)
 	}
 
 	url := r.URL().String()
@@ -586,18 +635,19 @@ func (r *Request) Watch() (watch.Interface, error) {
 		req = req.WithContext(r.ctx)
 	}
 	req.Header = r.headers
-	client := r.c.Client
+	client := r.client
 	if client == nil {
 		client = http.DefaultClient
 	}
-	r.backoff.Sleep(r.backoff.CalculateBackoff(r.URL()))
+	r.backoffMgr.Sleep(r.backoffMgr.CalculateBackoff(r.URL()))
 	resp, err := client.Do(req)
+
 	updateURLMetrics(r, resp, err)
-	if r.c.base != nil {
+	if r.baseURL != nil {
 		if err != nil {
-			r.backoff.UpdateBackoff(r.c.base, err, 0)
+			r.backoffMgr.UpdateBackoff(r.baseURL, err, 0)
 		} else {
-			r.backoff.UpdateBackoff(r.c.base, err, resp.StatusCode)
+			r.backoffMgr.UpdateBackoff(r.baseURL, err, resp.StatusCode)
 		}
 	}
 	if err != nil {
@@ -615,22 +665,10 @@ func (r *Request) Watch() (watch.Interface, error) {
 		}
 		return nil, fmt.Errorf("for request %s, got status: %v", url, resp.StatusCode)
 	}
-
-	contentType := resp.Header.Get("Content-Type")
-	mediaType, params, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		klog.V(4).Infof("Unexpected content type from the server: %q: %v", contentType, err)
-	}
-	objectDecoder, streamingSerializer, framer, err := r.c.content.Negotiator.StreamDecoder(mediaType, params)
-	if err != nil {
-		return nil, err
-	}
-
-	frameReader := framer.NewFrameReader(resp.Body)
-	watchEventDecoder := streaming.NewDecoder(frameReader, streamingSerializer)
+	wrapperDecoder := wrapperDecoderFn(resp.Body)
 
 	return watch.NewStreamWatcher(
-		restclientwatch.NewDecoder(watchEventDecoder, objectDecoder),
+		restclientwatch.NewDecoder(wrapperDecoder, embeddedDecoder),
 		// use 500 to indicate that the cause of the error is unknown - other error codes
 		// are more specific to HTTP interactions, and set a reason
 		errors.NewClientErrorReporter(http.StatusInternalServerError, r.verb, "ClientWatchDecoding"),
@@ -641,8 +679,8 @@ func (r *Request) Watch() (watch.Interface, error) {
 // It also handles corner cases for incomplete/invalid request data.
 func updateURLMetrics(req *Request, resp *http.Response, err error) {
 	url := "none"
-	if req.c.base != nil {
-		url = req.c.base.Host
+	if req.baseURL != nil {
+		url = req.baseURL.Host
 	}
 
 	// Errors can be arbitrary strings. Unbound label cardinality is not suitable for a metric
@@ -664,34 +702,29 @@ func (r *Request) Stream() (io.ReadCloser, error) {
 		return nil, r.err
 	}
 
-	if err := r.tryThrottle(); err != nil {
-		return nil, err
-	}
+	r.tryThrottle()
 
 	url := r.URL().String()
 	req, err := http.NewRequest(r.verb, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if r.body != nil {
-		req.Body = ioutil.NopCloser(r.body)
-	}
 	if r.ctx != nil {
 		req = req.WithContext(r.ctx)
 	}
 	req.Header = r.headers
-	client := r.c.Client
+	client := r.client
 	if client == nil {
 		client = http.DefaultClient
 	}
-	r.backoff.Sleep(r.backoff.CalculateBackoff(r.URL()))
+	r.backoffMgr.Sleep(r.backoffMgr.CalculateBackoff(r.URL()))
 	resp, err := client.Do(req)
 	updateURLMetrics(r, resp, err)
-	if r.c.base != nil {
+	if r.baseURL != nil {
 		if err != nil {
-			r.backoff.UpdateBackoff(r.URL(), err, 0)
+			r.backoffMgr.UpdateBackoff(r.URL(), err, 0)
 		} else {
-			r.backoff.UpdateBackoff(r.URL(), err, resp.StatusCode)
+			r.backoffMgr.UpdateBackoff(r.URL(), err, resp.StatusCode)
 		}
 	}
 	if err != nil {
@@ -715,33 +748,6 @@ func (r *Request) Stream() (io.ReadCloser, error) {
 	}
 }
 
-// requestPreflightCheck looks for common programmer errors on Request.
-//
-// We tackle here two programmer mistakes. The first one is to try to create
-// something(POST) using an empty string as namespace with namespaceSet as
-// true. If namespaceSet is true then namespace should also be defined. The
-// second mistake is, when under the same circumstances, the programmer tries
-// to GET, PUT or DELETE a named resource(resourceName != ""), again, if
-// namespaceSet is true then namespace must not be empty.
-func (r *Request) requestPreflightCheck() error {
-	if !r.namespaceSet {
-		return nil
-	}
-	if len(r.namespace) > 0 {
-		return nil
-	}
-
-	switch r.verb {
-	case "POST":
-		return fmt.Errorf("an empty namespace may not be set during creation")
-	case "GET", "PUT", "DELETE":
-		if len(r.resourceName) > 0 {
-			return fmt.Errorf("an empty namespace may not be set when a resource name is provided")
-		}
-	}
-	return nil
-}
-
 // request connects to the server and invokes the provided function when a server response is
 // received. It handles retry behavior and up front validation of requests. It will invoke
 // fn at most once. It will return an error if a problem occurred prior to connecting to the
@@ -758,11 +764,15 @@ func (r *Request) request(fn func(*http.Request, *http.Response)) error {
 		return r.err
 	}
 
-	if err := r.requestPreflightCheck(); err != nil {
-		return err
+	// TODO: added to catch programmer errors (invoking operations with an object with an empty namespace)
+	if (r.verb == "GET" || r.verb == "PUT" || r.verb == "DELETE") && r.namespaceSet && len(r.resourceName) > 0 && len(r.namespace) == 0 {
+		return fmt.Errorf("an empty namespace may not be set when a resource name is provided")
+	}
+	if (r.verb == "POST") && r.namespaceSet && len(r.namespace) == 0 {
+		return fmt.Errorf("an empty namespace may not be set during creation")
 	}
 
-	client := r.c.Client
+	client := r.client
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -789,21 +799,19 @@ func (r *Request) request(fn func(*http.Request, *http.Response)) error {
 		}
 		req.Header = r.headers
 
-		r.backoff.Sleep(r.backoff.CalculateBackoff(r.URL()))
+		r.backoffMgr.Sleep(r.backoffMgr.CalculateBackoff(r.URL()))
 		if retries > 0 {
 			// We are retrying the request that we already send to apiserver
 			// at least once before.
-			// This request should also be throttled with the client-internal rate limiter.
-			if err := r.tryThrottle(); err != nil {
-				return err
-			}
+			// This request should also be throttled with the client-internal throttler.
+			r.tryThrottle()
 		}
 		resp, err := client.Do(req)
 		updateURLMetrics(r, resp, err)
 		if err != nil {
-			r.backoff.UpdateBackoff(r.URL(), err, 0)
+			r.backoffMgr.UpdateBackoff(r.URL(), err, 0)
 		} else {
-			r.backoff.UpdateBackoff(r.URL(), err, resp.StatusCode)
+			r.backoffMgr.UpdateBackoff(r.URL(), err, resp.StatusCode)
 		}
 		if err != nil {
 			// "Connection reset by peer" is usually a transient error.
@@ -846,7 +854,7 @@ func (r *Request) request(fn func(*http.Request, *http.Response)) error {
 				}
 
 				klog.V(4).Infof("Got a Retry-After %ds response for attempt %d to %v", seconds, retries, url)
-				r.backoff.Sleep(time.Duration(seconds) * time.Second)
+				r.backoffMgr.Sleep(time.Duration(seconds) * time.Second)
 				return false
 			}
 			fn(req, resp)
@@ -862,12 +870,12 @@ func (r *Request) request(fn func(*http.Request, *http.Response)) error {
 // processing.
 //
 // Error type:
+//  * If the request can't be constructed, or an error happened earlier while building its
+//    arguments: *RequestConstructionError
 //  * If the server responds with a status: *errors.StatusError or *errors.UnexpectedObjectError
 //  * http.Client.Do errors are returned directly.
 func (r *Request) Do() Result {
-	if err := r.tryThrottle(); err != nil {
-		return Result{err: err}
-	}
+	r.tryThrottle()
 
 	var result Result
 	err := r.request(func(req *http.Request, resp *http.Response) {
@@ -881,9 +889,7 @@ func (r *Request) Do() Result {
 
 // DoRaw executes the request but does not process the response body.
 func (r *Request) DoRaw() ([]byte, error) {
-	if err := r.tryThrottle(); err != nil {
-		return nil, err
-	}
+	r.tryThrottle()
 
 	var result Result
 	err := r.request(func(req *http.Request, resp *http.Response) {
@@ -916,13 +922,13 @@ func (r *Request) transformResponse(resp *http.Response, req *http.Request) Resu
 			// 3. Apiserver closes connection.
 			// 4. client-go should catch this and return an error.
 			klog.V(2).Infof("Stream error %#v when reading response body, may be caused by closed connection.", err)
-			streamErr := fmt.Errorf("stream error when reading response body, may be caused by closed connection. Please retry. Original error: %v", err)
+			streamErr := fmt.Errorf("Stream error when reading response body, may be caused by closed connection. Please retry. Original error: %v", err)
 			return Result{
 				err: streamErr,
 			}
 		default:
 			klog.Errorf("Unexpected error when reading response body: %v", err)
-			unexpectedErr := fmt.Errorf("unexpected error when reading response body. Please retry. Original error: %v", err)
+			unexpectedErr := fmt.Errorf("Unexpected error when reading response body. Please retry. Original error: %v", err)
 			return Result{
 				err: unexpectedErr,
 			}
@@ -932,18 +938,14 @@ func (r *Request) transformResponse(resp *http.Response, req *http.Request) Resu
 	glogBody("Response Body", body)
 
 	// verify the content type is accurate
-	var decoder runtime.Decoder
 	contentType := resp.Header.Get("Content-Type")
-	if len(contentType) == 0 {
-		contentType = r.c.content.ContentType
-	}
-	if len(contentType) > 0 {
-		var err error
+	decoder := r.serializers.Decoder
+	if len(contentType) > 0 && (decoder == nil || (len(r.content.ContentType) > 0 && contentType != r.content.ContentType)) {
 		mediaType, params, err := mime.ParseMediaType(contentType)
 		if err != nil {
 			return Result{err: errors.NewInternalError(err)}
 		}
-		decoder, err = r.c.content.Negotiator.Decoder(mediaType, params)
+		decoder, err = r.serializers.RenegotiatedDecoder(mediaType, params)
 		if err != nil {
 			// if we fail to negotiate a decoder, treat this as an unstructured error
 			switch {
@@ -1063,7 +1065,7 @@ func (r *Request) newUnstructuredResponseError(body []byte, isTextResponse bool,
 	}
 	var groupResource schema.GroupResource
 	if len(r.resource) > 0 {
-		groupResource.Group = r.c.content.GroupVersion.Group
+		groupResource.Group = r.content.GroupVersion.Group
 		groupResource.Resource = r.resource
 	}
 	return errors.NewGenericServerResponse(

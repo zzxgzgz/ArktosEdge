@@ -1,5 +1,6 @@
 /*
 Copyright 2018 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +23,7 @@ import (
 )
 
 func (c *FakeServiceAccounts) CreateToken(name string, tr *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
-	obj, err := c.Fake.Invokes(core.NewCreateSubresourceAction(serviceaccountsResource, name, "token", c.ns, tr), &authenticationv1.TokenRequest{})
+	obj, err := c.Fake.Invokes(core.NewCreateSubresourceActionWithMultiTenancy(serviceaccountsResource, name, "token", c.ns, tr, c.te), &authenticationv1.TokenRequest{})
 
 	if obj == nil {
 		return nil, err

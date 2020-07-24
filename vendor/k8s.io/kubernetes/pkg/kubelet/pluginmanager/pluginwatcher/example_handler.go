@@ -28,7 +28,7 @@ import (
 	"google.golang.org/grpc"
 	"k8s.io/klog"
 
-	registerapi "k8s.io/kubelet/pkg/apis/pluginregistration/v1"
+	registerapi "k8s.io/kubernetes/pkg/kubelet/apis/pluginregistration/v1"
 	v1beta1 "k8s.io/kubernetes/pkg/kubelet/pluginmanager/pluginwatcher/example_plugin_apis/v1beta1"
 	v1beta2 "k8s.io/kubernetes/pkg/kubelet/pluginmanager/pluginwatcher/example_plugin_apis/v1beta2"
 )
@@ -39,7 +39,8 @@ type exampleHandler struct {
 
 	eventChans map[string]chan examplePluginEvent // map[pluginName]eventChan
 
-	m sync.Mutex
+	m     sync.Mutex
+	count int
 
 	permitDeprecatedDir bool
 }
@@ -50,6 +51,7 @@ const (
 	exampleEventValidate   examplePluginEvent = 0
 	exampleEventRegister   examplePluginEvent = 1
 	exampleEventDeRegister examplePluginEvent = 2
+	exampleEventError      examplePluginEvent = 3
 )
 
 // NewExampleHandler provide a example handler
@@ -63,7 +65,11 @@ func NewExampleHandler(supportedVersions []string, permitDeprecatedDir bool) *ex
 	}
 }
 
-func (p *exampleHandler) ValidatePlugin(pluginName string, endpoint string, versions []string) error {
+func (p *exampleHandler) ValidatePlugin(pluginName string, endpoint string, versions []string, foundInDeprecatedDir bool) error {
+	if foundInDeprecatedDir && !p.permitDeprecatedDir {
+		return fmt.Errorf("device plugin socket was found in a directory that is no longer supported and this test does not permit plugins from deprecated dir")
+	}
+
 	p.SendEvent(pluginName, exampleEventValidate)
 
 	n, ok := p.DecreasePluginCount(pluginName)
@@ -89,7 +95,7 @@ func (p *exampleHandler) RegisterPlugin(pluginName, endpoint string, versions []
 	// Verifies the grpcServer is ready to serve services.
 	_, conn, err := dial(endpoint, time.Second)
 	if err != nil {
-		return fmt.Errorf("failed dialing endpoint (%s): %v", endpoint, err)
+		return fmt.Errorf("Failed dialing endpoint (%s): %v", endpoint, err)
 	}
 	defer conn.Close()
 
@@ -100,13 +106,13 @@ func (p *exampleHandler) RegisterPlugin(pluginName, endpoint string, versions []
 	// Tests v1beta1 GetExampleInfo
 	_, err = v1beta1Client.GetExampleInfo(context.Background(), &v1beta1.ExampleRequest{})
 	if err != nil {
-		return fmt.Errorf("failed GetExampleInfo for v1beta2Client(%s): %v", endpoint, err)
+		return fmt.Errorf("Failed GetExampleInfo for v1beta2Client(%s): %v", endpoint, err)
 	}
 
 	// Tests v1beta1 GetExampleInfo
 	_, err = v1beta2Client.GetExampleInfo(context.Background(), &v1beta2.ExampleRequest{})
 	if err != nil {
-		return fmt.Errorf("failed GetExampleInfo for v1beta2Client(%s): %v", endpoint, err)
+		return fmt.Errorf("Failed GetExampleInfo for v1beta2Client(%s): %v", endpoint, err)
 	}
 
 	return nil

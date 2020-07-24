@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakeStatefulSets struct {
 	Fake *FakeAppsV1beta2
 	ns   string
+	te   string
 }
 
 var statefulsetsResource = schema.GroupVersionResource{Group: "apps", Version: "v1beta2", Resource: "statefulsets"}
@@ -41,18 +43,19 @@ var statefulsetsKind = schema.GroupVersionKind{Group: "apps", Version: "v1beta2"
 // Get takes name of the statefulSet, and returns the corresponding statefulSet object, and an error if there is any.
 func (c *FakeStatefulSets) Get(name string, options v1.GetOptions) (result *v1beta2.StatefulSet, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(statefulsetsResource, c.ns, name), &v1beta2.StatefulSet{})
+		Invokes(testing.NewGetActionWithMultiTenancy(statefulsetsResource, c.ns, name, c.te), &v1beta2.StatefulSet{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.StatefulSet), err
 }
 
 // List takes label and field selectors, and returns the list of StatefulSets that match those selectors.
 func (c *FakeStatefulSets) List(opts v1.ListOptions) (result *v1beta2.StatefulSetList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(statefulsetsResource, statefulsetsKind, c.ns, opts), &v1beta2.StatefulSetList{})
+		Invokes(testing.NewListActionWithMultiTenancy(statefulsetsResource, statefulsetsKind, c.ns, opts, c.te), &v1beta2.StatefulSetList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,32 +74,37 @@ func (c *FakeStatefulSets) List(opts v1.ListOptions) (result *v1beta2.StatefulSe
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested statefulSets.
-func (c *FakeStatefulSets) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(statefulsetsResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested statefulSets.
+func (c *FakeStatefulSets) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(statefulsetsResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a statefulSet and creates it.  Returns the server's representation of the statefulSet, and an error, if there is any.
 func (c *FakeStatefulSets) Create(statefulSet *v1beta2.StatefulSet) (result *v1beta2.StatefulSet, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(statefulsetsResource, c.ns, statefulSet), &v1beta2.StatefulSet{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(statefulsetsResource, c.ns, statefulSet, c.te), &v1beta2.StatefulSet{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.StatefulSet), err
 }
 
 // Update takes the representation of a statefulSet and updates it. Returns the server's representation of the statefulSet, and an error, if there is any.
 func (c *FakeStatefulSets) Update(statefulSet *v1beta2.StatefulSet) (result *v1beta2.StatefulSet, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(statefulsetsResource, c.ns, statefulSet), &v1beta2.StatefulSet{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(statefulsetsResource, c.ns, statefulSet, c.te), &v1beta2.StatefulSet{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.StatefulSet), err
 }
 
@@ -104,7 +112,7 @@ func (c *FakeStatefulSets) Update(statefulSet *v1beta2.StatefulSet) (result *v1b
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 func (c *FakeStatefulSets) UpdateStatus(statefulSet *v1beta2.StatefulSet) (*v1beta2.StatefulSet, error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(statefulsetsResource, "status", c.ns, statefulSet), &v1beta2.StatefulSet{})
+		Invokes(testing.NewUpdateSubresourceActionWithMultiTenancy(statefulsetsResource, "status", c.ns, statefulSet, c.te), &v1beta2.StatefulSet{})
 
 	if obj == nil {
 		return nil, err
@@ -115,14 +123,14 @@ func (c *FakeStatefulSets) UpdateStatus(statefulSet *v1beta2.StatefulSet) (*v1be
 // Delete takes name of the statefulSet and deletes it. Returns an error if one occurs.
 func (c *FakeStatefulSets) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(statefulsetsResource, c.ns, name), &v1beta2.StatefulSet{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(statefulsetsResource, c.ns, name, c.te), &v1beta2.StatefulSet{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeStatefulSets) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(statefulsetsResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(statefulsetsResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &v1beta2.StatefulSetList{})
 	return err
@@ -131,32 +139,35 @@ func (c *FakeStatefulSets) DeleteCollection(options *v1.DeleteOptions, listOptio
 // Patch applies the patch and returns the patched statefulSet.
 func (c *FakeStatefulSets) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta2.StatefulSet, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(statefulsetsResource, c.ns, name, pt, data, subresources...), &v1beta2.StatefulSet{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(statefulsetsResource, c.te, c.ns, name, pt, data, subresources...), &v1beta2.StatefulSet{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.StatefulSet), err
 }
 
 // GetScale takes name of the statefulSet, and returns the corresponding scale object, and an error if there is any.
 func (c *FakeStatefulSets) GetScale(statefulSetName string, options v1.GetOptions) (result *v1beta2.Scale, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetSubresourceAction(statefulsetsResource, c.ns, "scale", statefulSetName), &v1beta2.Scale{})
+		Invokes(testing.NewGetSubresourceActionWithMultiTenancy(statefulsetsResource, c.ns, "scale", statefulSetName, c.te), &v1beta2.Scale{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.Scale), err
 }
 
 // UpdateScale takes the representation of a scale and updates it. Returns the server's representation of the scale, and an error, if there is any.
 func (c *FakeStatefulSets) UpdateScale(statefulSetName string, scale *v1beta2.Scale) (result *v1beta2.Scale, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(statefulsetsResource, "scale", c.ns, scale), &v1beta2.Scale{})
+		Invokes(testing.NewUpdateSubresourceActionWithMultiTenancy(statefulsetsResource, "scale", c.ns, scale, c.te), &v1beta2.Scale{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.Scale), err
 }

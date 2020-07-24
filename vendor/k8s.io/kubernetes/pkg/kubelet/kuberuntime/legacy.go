@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,8 +40,8 @@ const (
 
 // legacyLogSymlink composes the legacy container log path. It is only used for legacy cluster
 // logging support.
-func legacyLogSymlink(containerID string, containerName, podName, podNamespace string) string {
-	return logSymlink(legacyContainerLogsDir, kubecontainer.BuildPodFullName(podName, podNamespace),
+func legacyLogSymlink(containerID string, containerName, podName, podNamespace, podTenant string) string {
+	return logSymlink(legacyContainerLogsDir, kubecontainer.BuildPodFullName(podName, podNamespace, podTenant),
 		containerName, containerID)
 }
 

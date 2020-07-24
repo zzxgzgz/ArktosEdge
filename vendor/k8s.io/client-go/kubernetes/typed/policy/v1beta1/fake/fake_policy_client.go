@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,15 +30,27 @@ type FakePolicyV1beta1 struct {
 }
 
 func (c *FakePolicyV1beta1) Evictions(namespace string) v1beta1.EvictionInterface {
-	return &FakeEvictions{c, namespace}
+	return &FakeEvictions{c, namespace, "system"}
+}
+
+func (c *FakePolicyV1beta1) EvictionsWithMultiTenancy(namespace string, tenant string) v1beta1.EvictionInterface {
+	return &FakeEvictions{c, namespace, tenant}
 }
 
 func (c *FakePolicyV1beta1) PodDisruptionBudgets(namespace string) v1beta1.PodDisruptionBudgetInterface {
-	return &FakePodDisruptionBudgets{c, namespace}
+	return &FakePodDisruptionBudgets{c, namespace, "system"}
+}
+
+func (c *FakePolicyV1beta1) PodDisruptionBudgetsWithMultiTenancy(namespace string, tenant string) v1beta1.PodDisruptionBudgetInterface {
+	return &FakePodDisruptionBudgets{c, namespace, tenant}
 }
 
 func (c *FakePolicyV1beta1) PodSecurityPolicies() v1beta1.PodSecurityPolicyInterface {
-	return &FakePodSecurityPolicies{c}
+	return &FakePodSecurityPolicies{c, "system"}
+}
+
+func (c *FakePolicyV1beta1) PodSecurityPoliciesWithMultiTenancy(tenant string) v1beta1.PodSecurityPolicyInterface {
+	return &FakePodSecurityPolicies{c, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -45,4 +58,11 @@ func (c *FakePolicyV1beta1) PodSecurityPolicies() v1beta1.PodSecurityPolicyInter
 func (c *FakePolicyV1beta1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakePolicyV1beta1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

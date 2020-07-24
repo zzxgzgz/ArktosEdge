@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +30,11 @@ type FakeAutoscalingV2beta2 struct {
 }
 
 func (c *FakeAutoscalingV2beta2) HorizontalPodAutoscalers(namespace string) v2beta2.HorizontalPodAutoscalerInterface {
-	return &FakeHorizontalPodAutoscalers{c, namespace}
+	return &FakeHorizontalPodAutoscalers{c, namespace, "system"}
+}
+
+func (c *FakeAutoscalingV2beta2) HorizontalPodAutoscalersWithMultiTenancy(namespace string, tenant string) v2beta2.HorizontalPodAutoscalerInterface {
+	return &FakeHorizontalPodAutoscalers{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -37,4 +42,11 @@ func (c *FakeAutoscalingV2beta2) HorizontalPodAutoscalers(namespace string) v2be
 func (c *FakeAutoscalingV2beta2) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeAutoscalingV2beta2) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

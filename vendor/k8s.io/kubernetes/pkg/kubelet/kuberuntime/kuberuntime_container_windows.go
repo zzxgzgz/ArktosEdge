@@ -2,6 +2,7 @@
 
 /*
 Copyright 2018 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,6 +51,9 @@ func (m *kubeGenericRuntimeManager) generateWindowsContainerConfig(container *v1
 	}
 
 	cpuRequest := container.Resources.Requests.Cpu()
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodVerticalScaling) {
+		cpuRequest := container.ResourcesAllocated.Cpu()
+	}
 	cpuLimit := container.Resources.Limits.Cpu()
 	isolatedByHyperv := kubeletapis.ShouldIsolatedByHyperV(pod.Annotations)
 	if !cpuLimit.IsZero() {
@@ -100,11 +104,6 @@ func (m *kubeGenericRuntimeManager) generateWindowsContainerConfig(container *v1
 		effectiveSc.WindowsOptions != nil &&
 		effectiveSc.WindowsOptions.GMSACredentialSpec != nil {
 		wc.SecurityContext.CredentialSpec = *effectiveSc.WindowsOptions.GMSACredentialSpec
-	}
-
-	// override with Windows options if present
-	if effectiveSc.WindowsOptions != nil && effectiveSc.WindowsOptions.RunAsUserName != nil {
-		wc.SecurityContext.RunAsUsername = *effectiveSc.WindowsOptions.RunAsUserName
 	}
 
 	return wc, nil

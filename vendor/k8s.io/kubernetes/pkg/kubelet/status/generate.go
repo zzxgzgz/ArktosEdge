@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,21 +21,19 @@ import (
 	"fmt"
 	"strings"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 )
 
 const (
-	// UnknownContainerStatuses says that all container statuses are unknown.
 	UnknownContainerStatuses = "UnknownContainerStatuses"
-	// PodCompleted says that all related containers have succeeded.
-	PodCompleted = "PodCompleted"
-	// ContainersNotReady says that one or more containers are not ready.
-	ContainersNotReady = "ContainersNotReady"
-	// ContainersNotInitialized says that one or more init containers have not succeeded.
+	PodCompleted             = "PodCompleted"
+	ContainersNotReady       = "ContainersNotReady"
 	ContainersNotInitialized = "ContainersNotInitialized"
-	// ReadinessGatesNotReady says that one or more pod readiness gates are not ready.
-	ReadinessGatesNotReady = "ReadinessGatesNotReady"
+	ReadinessGatesNotReady   = "ReadinessGatesNotReady"
+	VmNotReady               = "VirtualMachineNotReady"
+	VmShutdown               = "VirtualMachineShutdown"
+	UnknownVmStatus          = "UnknownVirtualMachineStatus"
 )
 
 // GenerateContainersReadyCondition returns the status of "ContainersReady" condition.
@@ -96,15 +95,34 @@ func GenerateContainersReadyCondition(spec *v1.PodSpec, containerStatuses []v1.C
 // GeneratePodReadyCondition returns "Ready" condition of a pod.
 // The status of "Ready" condition is "True", if all containers in a pod are ready
 // AND all matching conditions specified in the ReadinessGates have status equal to "True".
-func GeneratePodReadyCondition(spec *v1.PodSpec, conditions []v1.PodCondition, containerStatuses []v1.ContainerStatus, podPhase v1.PodPhase) v1.PodCondition {
-	containersReady := GenerateContainersReadyCondition(spec, containerStatuses, podPhase)
-	// If the status of ContainersReady is not True, return the same status, reason and message as ContainersReady.
-	if containersReady.Status != v1.ConditionTrue {
-		return v1.PodCondition{
-			Type:    v1.PodReady,
-			Status:  containersReady.Status,
-			Reason:  containersReady.Reason,
-			Message: containersReady.Message,
+func GeneratePodReadyCondition(spec *v1.PodSpec, conditions []v1.PodCondition, containerStatuses []v1.ContainerStatus, vmStatus *v1.VirtualMachineStatus, podPhase v1.PodPhase) v1.PodCondition {
+	if vmStatus != nil {
+		if !vmStatus.Ready {
+			if vmStatus.PowerState == v1.Shutdown &&
+				vmStatus.State == v1.VmStopped {
+				return v1.PodCondition{
+					Type:   v1.PodReady,
+					Status: v1.ConditionFalse,
+					Reason: VmShutdown,
+				}
+			}
+			return v1.PodCondition{
+				Type:    v1.PodReady,
+				Status:  v1.ConditionFalse,
+				Reason:  VmNotReady,
+				Message: VmNotReady,
+			}
+		}
+	} else {
+		containersReady := GenerateContainersReadyCondition(spec, containerStatuses, podPhase)
+		// If the status of ContainersReady is not True, return the same status, reason and message as ContainersReady.
+		if containersReady.Status != v1.ConditionTrue {
+			return v1.PodCondition{
+				Type:    v1.PodReady,
+				Status:  containersReady.Status,
+				Reason:  containersReady.Reason,
+				Message: containersReady.Message,
+			}
 		}
 	}
 
@@ -189,5 +207,31 @@ func GeneratePodInitializedCondition(spec *v1.PodSpec, containerStatuses []v1.Co
 	return v1.PodCondition{
 		Type:   v1.PodInitialized,
 		Status: v1.ConditionTrue,
+	}
+}
+
+// GenerateVmReadyCondition returns the status of "VmReady" condition.
+// The status of "VmReady" condition is true when the VM is in the ready state
+func GenerateVmReadyCondition(spec *v1.PodSpec, vmStatus *v1.VirtualMachineStatus, podPhase v1.PodPhase) v1.PodCondition {
+	if vmStatus == nil {
+		return v1.PodCondition{
+			Type:   v1.VmReady,
+			Status: v1.ConditionFalse,
+			Reason: UnknownVmStatus,
+		}
+	}
+
+	if vmStatus.Ready {
+		return v1.PodCondition{
+			Type:   v1.VmReady,
+			Status: v1.ConditionTrue,
+			Reason: PodCompleted,
+		}
+	}
+
+	return v1.PodCondition{
+		Type:   v1.VmReady,
+		Status: v1.ConditionFalse,
+		Reason: VmNotReady,
 	}
 }

@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +19,14 @@ limitations under the License.
 
 package v1
 
+// ActionListerExpansion allows custom methods to be added to
+// ActionLister.
+type ActionListerExpansion interface{}
+
+// ActionNamespaceListerExpansion allows custom methods to be added to
+// ActionNamespaceLister.
+type ActionNamespaceListerExpansion interface{}
+
 // ComponentStatusListerExpansion allows custom methods to be added to
 // ComponentStatusLister.
 type ComponentStatusListerExpansion interface{}
@@ -29,6 +38,14 @@ type ConfigMapListerExpansion interface{}
 // ConfigMapNamespaceListerExpansion allows custom methods to be added to
 // ConfigMapNamespaceLister.
 type ConfigMapNamespaceListerExpansion interface{}
+
+// ControllerInstanceListerExpansion allows custom methods to be added to
+// ControllerInstanceLister.
+type ControllerInstanceListerExpansion interface{}
+
+// DataPartitionConfigListerExpansion allows custom methods to be added to
+// DataPartitionConfigLister.
+type DataPartitionConfigListerExpansion interface{}
 
 // EndpointsListerExpansion allows custom methods to be added to
 // EndpointsLister.
@@ -58,9 +75,17 @@ type LimitRangeNamespaceListerExpansion interface{}
 // NamespaceLister.
 type NamespaceListerExpansion interface{}
 
+// NamespaceTenantListerExpansion allows custom methods to be added to
+// NamespaceTenantLister.
+type NamespaceTenantListerExpansion interface{}
+
 // PersistentVolumeListerExpansion allows custom methods to be added to
 // PersistentVolumeLister.
 type PersistentVolumeListerExpansion interface{}
+
+// PersistentVolumeTenantListerExpansion allows custom methods to be added to
+// PersistentVolumeTenantLister.
+type PersistentVolumeTenantListerExpansion interface{}
 
 // PersistentVolumeClaimListerExpansion allows custom methods to be added to
 // PersistentVolumeClaimLister.
@@ -109,3 +134,11 @@ type ServiceAccountListerExpansion interface{}
 // ServiceAccountNamespaceListerExpansion allows custom methods to be added to
 // ServiceAccountNamespaceLister.
 type ServiceAccountNamespaceListerExpansion interface{}
+
+// StorageClusterListerExpansion allows custom methods to be added to
+// StorageClusterLister.
+type StorageClusterListerExpansion interface{}
+
+// TenantListerExpansion allows custom methods to be added to
+// TenantLister.
+type TenantListerExpansion interface{}

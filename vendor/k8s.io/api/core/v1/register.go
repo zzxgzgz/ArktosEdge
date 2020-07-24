@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -67,8 +68,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LimitRangeList{},
 		&ResourceQuota{},
 		&ResourceQuotaList{},
+		&Tenant{},
+		&TenantList{},
+		&StorageCluster{},
+		&StorageClusterList{},
 		&Namespace{},
 		&NamespaceList{},
+		&ControllerInstance{},
+		&ControllerInstanceList{},
 		&Secret{},
 		&SecretList{},
 		&ServiceAccount{},
@@ -88,7 +95,11 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&RangeAllocation{},
 		&ConfigMap{},
 		&ConfigMapList{},
-		&EphemeralContainers{},
+		&CustomAction{},
+		&Action{},
+		&ActionList{},
+		&DataPartitionConfig{},
+		&DataPartitionConfigList{},
 	)
 
 	// Add common types

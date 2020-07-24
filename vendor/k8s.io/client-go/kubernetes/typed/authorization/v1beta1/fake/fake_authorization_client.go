@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,19 +30,35 @@ type FakeAuthorizationV1beta1 struct {
 }
 
 func (c *FakeAuthorizationV1beta1) LocalSubjectAccessReviews(namespace string) v1beta1.LocalSubjectAccessReviewInterface {
-	return &FakeLocalSubjectAccessReviews{c, namespace}
+	return &FakeLocalSubjectAccessReviews{c, namespace, "system"}
+}
+
+func (c *FakeAuthorizationV1beta1) LocalSubjectAccessReviewsWithMultiTenancy(namespace string, tenant string) v1beta1.LocalSubjectAccessReviewInterface {
+	return &FakeLocalSubjectAccessReviews{c, namespace, tenant}
 }
 
 func (c *FakeAuthorizationV1beta1) SelfSubjectAccessReviews() v1beta1.SelfSubjectAccessReviewInterface {
-	return &FakeSelfSubjectAccessReviews{c}
+	return &FakeSelfSubjectAccessReviews{c, "system"}
+}
+
+func (c *FakeAuthorizationV1beta1) SelfSubjectAccessReviewsWithMultiTenancy(tenant string) v1beta1.SelfSubjectAccessReviewInterface {
+	return &FakeSelfSubjectAccessReviews{c, tenant}
 }
 
 func (c *FakeAuthorizationV1beta1) SelfSubjectRulesReviews() v1beta1.SelfSubjectRulesReviewInterface {
-	return &FakeSelfSubjectRulesReviews{c}
+	return &FakeSelfSubjectRulesReviews{c, "system"}
+}
+
+func (c *FakeAuthorizationV1beta1) SelfSubjectRulesReviewsWithMultiTenancy(tenant string) v1beta1.SelfSubjectRulesReviewInterface {
+	return &FakeSelfSubjectRulesReviews{c, tenant}
 }
 
 func (c *FakeAuthorizationV1beta1) SubjectAccessReviews() v1beta1.SubjectAccessReviewInterface {
-	return &FakeSubjectAccessReviews{c}
+	return &FakeSubjectAccessReviews{c, "system"}
+}
+
+func (c *FakeAuthorizationV1beta1) SubjectAccessReviewsWithMultiTenancy(tenant string) v1beta1.SubjectAccessReviewInterface {
+	return &FakeSubjectAccessReviews{c, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -49,4 +66,11 @@ func (c *FakeAuthorizationV1beta1) SubjectAccessReviews() v1beta1.SubjectAccessR
 func (c *FakeAuthorizationV1beta1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeAuthorizationV1beta1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

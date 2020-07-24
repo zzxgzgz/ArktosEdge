@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,36 +20,60 @@ limitations under the License.
 package v1beta1
 
 import (
+	rand "math/rand"
+	"time"
+
 	v1beta1 "k8s.io/api/events/v1beta1"
+	apiserverupdate "k8s.io/client-go/apiserverupdate"
 	"k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 type EventsV1beta1Interface interface {
 	RESTClient() rest.Interface
+	RESTClients() []rest.Interface
 	EventsGetter
 }
 
 // EventsV1beta1Client is used to interact with features provided by the events.k8s.io group.
 type EventsV1beta1Client struct {
-	restClient rest.Interface
+	restClients []rest.Interface
+	configs     *rest.Config
 }
 
 func (c *EventsV1beta1Client) Events(namespace string) EventInterface {
-	return newEvents(c, namespace)
+	return newEventsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *EventsV1beta1Client) EventsWithMultiTenancy(namespace string, tenant string) EventInterface {
+	return newEventsWithMultiTenancy(c, namespace, tenant)
 }
 
 // NewForConfig creates a new EventsV1beta1Client for the given config.
 func NewForConfig(c *rest.Config) (*EventsV1beta1Client, error) {
-	config := *c
-	if err := setConfigDefaults(&config); err != nil {
+	configs := rest.CopyConfigs(c)
+	if err := setConfigDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
-	if err != nil {
-		return nil, err
+
+	clients := make([]rest.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := rest.RESTClientFor(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
 	}
-	return &EventsV1beta1Client{client}, nil
+
+	obj := &EventsV1beta1Client{
+		restClients: clients,
+		configs:     configs,
+	}
+
+	obj.run()
+
+	return obj, nil
 }
 
 // NewForConfigOrDie creates a new EventsV1beta1Client for the given config and
@@ -63,17 +88,21 @@ func NewForConfigOrDie(c *rest.Config) *EventsV1beta1Client {
 
 // New creates a new EventsV1beta1Client for the given RESTClient.
 func New(c rest.Interface) *EventsV1beta1Client {
-	return &EventsV1beta1Client{c}
+	clients := []rest.Interface{c}
+	return &EventsV1beta1Client{restClients: clients}
 }
 
-func setConfigDefaults(config *rest.Config) error {
+func setConfigDefaults(configs *rest.Config) error {
 	gv := v1beta1.SchemeGroupVersion
-	config.GroupVersion = &gv
-	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	for _, config := range configs.GetAllConfigs() {
+		config.GroupVersion = &gv
+		config.APIPath = "/apis"
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+
+		if config.UserAgent == "" {
+			config.UserAgent = rest.DefaultKubernetesUserAgent()
+		}
 	}
 
 	return nil
@@ -85,5 +114,50 @@ func (c *EventsV1beta1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
-	return c.restClient
+
+	max := len(c.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return c.restClients[0]
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	ran := rand.Intn(max)
+	return c.restClients[ran]
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *EventsV1beta1Client) RESTClients() []rest.Interface {
+	if c == nil {
+		return nil
+	}
+
+	return c.restClients
+}
+
+// run watch api server instance updates and recreate connections to new set of api servers
+func (c *EventsV1beta1Client) run() {
+	go func(c *EventsV1beta1Client) {
+		member := c.configs.WatchUpdate()
+		watcherForUpdateComplete := apiserverupdate.GetClientSetsWatcher()
+		watcherForUpdateComplete.AddWatcher()
+
+		for range member.Read {
+			// create new client
+			clients := make([]rest.Interface, len(c.configs.GetAllConfigs()))
+			for i, config := range c.configs.GetAllConfigs() {
+				client, err := rest.RESTClientFor(config)
+				if err != nil {
+					klog.Fatalf("Cannot create rest client for [%+v], err %v", config, err)
+					return
+				}
+				clients[i] = client
+			}
+			c.restClients = clients
+			watcherForUpdateComplete.NotifyDone()
+		}
+	}(c)
 }

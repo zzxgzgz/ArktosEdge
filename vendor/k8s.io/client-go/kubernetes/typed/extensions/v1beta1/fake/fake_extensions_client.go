@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,27 +30,51 @@ type FakeExtensionsV1beta1 struct {
 }
 
 func (c *FakeExtensionsV1beta1) DaemonSets(namespace string) v1beta1.DaemonSetInterface {
-	return &FakeDaemonSets{c, namespace}
+	return &FakeDaemonSets{c, namespace, "system"}
+}
+
+func (c *FakeExtensionsV1beta1) DaemonSetsWithMultiTenancy(namespace string, tenant string) v1beta1.DaemonSetInterface {
+	return &FakeDaemonSets{c, namespace, tenant}
 }
 
 func (c *FakeExtensionsV1beta1) Deployments(namespace string) v1beta1.DeploymentInterface {
-	return &FakeDeployments{c, namespace}
+	return &FakeDeployments{c, namespace, "system"}
+}
+
+func (c *FakeExtensionsV1beta1) DeploymentsWithMultiTenancy(namespace string, tenant string) v1beta1.DeploymentInterface {
+	return &FakeDeployments{c, namespace, tenant}
 }
 
 func (c *FakeExtensionsV1beta1) Ingresses(namespace string) v1beta1.IngressInterface {
-	return &FakeIngresses{c, namespace}
+	return &FakeIngresses{c, namespace, "system"}
+}
+
+func (c *FakeExtensionsV1beta1) IngressesWithMultiTenancy(namespace string, tenant string) v1beta1.IngressInterface {
+	return &FakeIngresses{c, namespace, tenant}
 }
 
 func (c *FakeExtensionsV1beta1) NetworkPolicies(namespace string) v1beta1.NetworkPolicyInterface {
-	return &FakeNetworkPolicies{c, namespace}
+	return &FakeNetworkPolicies{c, namespace, "system"}
+}
+
+func (c *FakeExtensionsV1beta1) NetworkPoliciesWithMultiTenancy(namespace string, tenant string) v1beta1.NetworkPolicyInterface {
+	return &FakeNetworkPolicies{c, namespace, tenant}
 }
 
 func (c *FakeExtensionsV1beta1) PodSecurityPolicies() v1beta1.PodSecurityPolicyInterface {
-	return &FakePodSecurityPolicies{c}
+	return &FakePodSecurityPolicies{c, "system"}
+}
+
+func (c *FakeExtensionsV1beta1) PodSecurityPoliciesWithMultiTenancy(tenant string) v1beta1.PodSecurityPolicyInterface {
+	return &FakePodSecurityPolicies{c, tenant}
 }
 
 func (c *FakeExtensionsV1beta1) ReplicaSets(namespace string) v1beta1.ReplicaSetInterface {
-	return &FakeReplicaSets{c, namespace}
+	return &FakeReplicaSets{c, namespace, "system"}
+}
+
+func (c *FakeExtensionsV1beta1) ReplicaSetsWithMultiTenancy(namespace string, tenant string) v1beta1.ReplicaSetInterface {
+	return &FakeReplicaSets{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -57,4 +82,11 @@ func (c *FakeExtensionsV1beta1) ReplicaSets(namespace string) v1beta1.ReplicaSet
 func (c *FakeExtensionsV1beta1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeExtensionsV1beta1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

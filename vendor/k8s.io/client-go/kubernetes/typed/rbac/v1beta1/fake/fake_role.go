@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakeRoles struct {
 	Fake *FakeRbacV1beta1
 	ns   string
+	te   string
 }
 
 var rolesResource = schema.GroupVersionResource{Group: "rbac.authorization.k8s.io", Version: "v1beta1", Resource: "roles"}
@@ -41,18 +43,19 @@ var rolesKind = schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Vers
 // Get takes name of the role, and returns the corresponding role object, and an error if there is any.
 func (c *FakeRoles) Get(name string, options v1.GetOptions) (result *v1beta1.Role, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(rolesResource, c.ns, name), &v1beta1.Role{})
+		Invokes(testing.NewGetActionWithMultiTenancy(rolesResource, c.ns, name, c.te), &v1beta1.Role{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.Role), err
 }
 
 // List takes label and field selectors, and returns the list of Roles that match those selectors.
 func (c *FakeRoles) List(opts v1.ListOptions) (result *v1beta1.RoleList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(rolesResource, rolesKind, c.ns, opts), &v1beta1.RoleList{})
+		Invokes(testing.NewListActionWithMultiTenancy(rolesResource, rolesKind, c.ns, opts, c.te), &v1beta1.RoleList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,46 +74,51 @@ func (c *FakeRoles) List(opts v1.ListOptions) (result *v1beta1.RoleList, err err
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested roles.
-func (c *FakeRoles) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(rolesResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested roles.
+func (c *FakeRoles) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(rolesResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a role and creates it.  Returns the server's representation of the role, and an error, if there is any.
 func (c *FakeRoles) Create(role *v1beta1.Role) (result *v1beta1.Role, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(rolesResource, c.ns, role), &v1beta1.Role{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(rolesResource, c.ns, role, c.te), &v1beta1.Role{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.Role), err
 }
 
 // Update takes the representation of a role and updates it. Returns the server's representation of the role, and an error, if there is any.
 func (c *FakeRoles) Update(role *v1beta1.Role) (result *v1beta1.Role, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(rolesResource, c.ns, role), &v1beta1.Role{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(rolesResource, c.ns, role, c.te), &v1beta1.Role{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.Role), err
 }
 
 // Delete takes name of the role and deletes it. Returns an error if one occurs.
 func (c *FakeRoles) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(rolesResource, c.ns, name), &v1beta1.Role{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(rolesResource, c.ns, name, c.te), &v1beta1.Role{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeRoles) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(rolesResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(rolesResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &v1beta1.RoleList{})
 	return err
@@ -119,10 +127,11 @@ func (c *FakeRoles) DeleteCollection(options *v1.DeleteOptions, listOptions v1.L
 // Patch applies the patch and returns the patched role.
 func (c *FakeRoles) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.Role, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(rolesResource, c.ns, name, pt, data, subresources...), &v1beta1.Role{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(rolesResource, c.te, c.ns, name, pt, data, subresources...), &v1beta1.Role{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.Role), err
 }

@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +30,11 @@ type FakeAuditregistrationV1alpha1 struct {
 }
 
 func (c *FakeAuditregistrationV1alpha1) AuditSinks() v1alpha1.AuditSinkInterface {
-	return &FakeAuditSinks{c}
+	return &FakeAuditSinks{c, "system"}
+}
+
+func (c *FakeAuditregistrationV1alpha1) AuditSinksWithMultiTenancy(tenant string) v1alpha1.AuditSinkInterface {
+	return &FakeAuditSinks{c, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -37,4 +42,11 @@ func (c *FakeAuditregistrationV1alpha1) AuditSinks() v1alpha1.AuditSinkInterface
 func (c *FakeAuditregistrationV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeAuditregistrationV1alpha1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

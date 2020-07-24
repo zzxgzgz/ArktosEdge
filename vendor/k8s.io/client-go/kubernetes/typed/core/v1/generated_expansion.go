@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,9 +19,15 @@ limitations under the License.
 
 package v1
 
+type ActionExpansion interface{}
+
 type ComponentStatusExpansion interface{}
 
 type ConfigMapExpansion interface{}
+
+type ControllerInstanceExpansion interface{}
+
+type DataPartitionConfigExpansion interface{}
 
 type EndpointsExpansion interface{}
 
@@ -37,3 +44,5 @@ type ReplicationControllerExpansion interface{}
 type ResourceQuotaExpansion interface{}
 
 type SecretExpansion interface{}
+
+type StorageClusterExpansion interface{}

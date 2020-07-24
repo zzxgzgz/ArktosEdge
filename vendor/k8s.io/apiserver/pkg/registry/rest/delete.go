@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -150,7 +151,7 @@ func AdmissionToValidateObjectDeleteFunc(admit admission.Interface, staticAttrib
 	mutating := isMutatingAdmission && mutatingAdmission.Handles(staticAttributes.GetOperation())
 	validating := isValidatingAdmission && validatingAdmission.Handles(staticAttributes.GetOperation())
 
-	return func(ctx context.Context, old runtime.Object) error {
+	return func(old runtime.Object) error {
 		if !mutating && !validating {
 			return nil
 		}
@@ -159,6 +160,7 @@ func AdmissionToValidateObjectDeleteFunc(admit admission.Interface, staticAttrib
 			// Deep copy the object to avoid accidentally changing the object.
 			old.DeepCopyObject(),
 			staticAttributes.GetKind(),
+			staticAttributes.GetTenant(),
 			staticAttributes.GetNamespace(),
 			staticAttributes.GetName(),
 			staticAttributes.GetResource(),
@@ -169,12 +171,12 @@ func AdmissionToValidateObjectDeleteFunc(admit admission.Interface, staticAttrib
 			staticAttributes.GetUserInfo(),
 		)
 		if mutating {
-			if err := mutatingAdmission.Admit(ctx, finalAttributes, objInterfaces); err != nil {
+			if err := mutatingAdmission.Admit(finalAttributes, objInterfaces); err != nil {
 				return err
 			}
 		}
 		if validating {
-			if err := validatingAdmission.Validate(ctx, finalAttributes, objInterfaces); err != nil {
+			if err := validatingAdmission.Validate(finalAttributes, objInterfaces); err != nil {
 				return err
 			}
 		}

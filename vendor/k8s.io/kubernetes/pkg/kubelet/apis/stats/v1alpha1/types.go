@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -146,13 +147,14 @@ type ContainerStats struct {
 	// User defined metrics that are exposed by containers in the pod. Typically, we expect only one container in the pod to be exposing user defined metrics. In the event of multiple containers exposing metrics, they will be combined here.
 	// +patchMergeKey=name
 	// +patchStrategy=merge
-	UserDefinedMetrics []UserDefinedMetric `json:"userDefinedMetrics,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
+	UserDefinedMetrics []UserDefinedMetric `json:"userDefinedMetrics,omitmepty" patchStrategy:"merge" patchMergeKey:"name"`
 }
 
 // PodReference contains enough information to locate the referenced pod.
 type PodReference struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
+	Tenant    string `json:"tenant"`
 	UID       string `json:"uid"`
 }
 

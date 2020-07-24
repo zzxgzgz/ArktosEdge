@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakeControllerRevisions struct {
 	Fake *FakeAppsV1beta2
 	ns   string
+	te   string
 }
 
 var controllerrevisionsResource = schema.GroupVersionResource{Group: "apps", Version: "v1beta2", Resource: "controllerrevisions"}
@@ -41,18 +43,19 @@ var controllerrevisionsKind = schema.GroupVersionKind{Group: "apps", Version: "v
 // Get takes name of the controllerRevision, and returns the corresponding controllerRevision object, and an error if there is any.
 func (c *FakeControllerRevisions) Get(name string, options v1.GetOptions) (result *v1beta2.ControllerRevision, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(controllerrevisionsResource, c.ns, name), &v1beta2.ControllerRevision{})
+		Invokes(testing.NewGetActionWithMultiTenancy(controllerrevisionsResource, c.ns, name, c.te), &v1beta2.ControllerRevision{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.ControllerRevision), err
 }
 
 // List takes label and field selectors, and returns the list of ControllerRevisions that match those selectors.
 func (c *FakeControllerRevisions) List(opts v1.ListOptions) (result *v1beta2.ControllerRevisionList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(controllerrevisionsResource, controllerrevisionsKind, c.ns, opts), &v1beta2.ControllerRevisionList{})
+		Invokes(testing.NewListActionWithMultiTenancy(controllerrevisionsResource, controllerrevisionsKind, c.ns, opts, c.te), &v1beta2.ControllerRevisionList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,46 +74,51 @@ func (c *FakeControllerRevisions) List(opts v1.ListOptions) (result *v1beta2.Con
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested controllerRevisions.
-func (c *FakeControllerRevisions) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(controllerrevisionsResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested controllerRevisions.
+func (c *FakeControllerRevisions) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(controllerrevisionsResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a controllerRevision and creates it.  Returns the server's representation of the controllerRevision, and an error, if there is any.
 func (c *FakeControllerRevisions) Create(controllerRevision *v1beta2.ControllerRevision) (result *v1beta2.ControllerRevision, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(controllerrevisionsResource, c.ns, controllerRevision), &v1beta2.ControllerRevision{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(controllerrevisionsResource, c.ns, controllerRevision, c.te), &v1beta2.ControllerRevision{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.ControllerRevision), err
 }
 
 // Update takes the representation of a controllerRevision and updates it. Returns the server's representation of the controllerRevision, and an error, if there is any.
 func (c *FakeControllerRevisions) Update(controllerRevision *v1beta2.ControllerRevision) (result *v1beta2.ControllerRevision, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(controllerrevisionsResource, c.ns, controllerRevision), &v1beta2.ControllerRevision{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(controllerrevisionsResource, c.ns, controllerRevision, c.te), &v1beta2.ControllerRevision{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.ControllerRevision), err
 }
 
 // Delete takes name of the controllerRevision and deletes it. Returns an error if one occurs.
 func (c *FakeControllerRevisions) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(controllerrevisionsResource, c.ns, name), &v1beta2.ControllerRevision{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(controllerrevisionsResource, c.ns, name, c.te), &v1beta2.ControllerRevision{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeControllerRevisions) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(controllerrevisionsResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(controllerrevisionsResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &v1beta2.ControllerRevisionList{})
 	return err
@@ -119,10 +127,11 @@ func (c *FakeControllerRevisions) DeleteCollection(options *v1.DeleteOptions, li
 // Patch applies the patch and returns the patched controllerRevision.
 func (c *FakeControllerRevisions) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta2.ControllerRevision, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(controllerrevisionsResource, c.ns, name, pt, data, subresources...), &v1beta2.ControllerRevision{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(controllerrevisionsResource, c.te, c.ns, name, pt, data, subresources...), &v1beta2.ControllerRevision{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta2.ControllerRevision), err
 }

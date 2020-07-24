@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,6 +43,7 @@ type networkPolicyInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
 	namespace        string
+	tenant           string
 }
 
 // NewNetworkPolicyInformer constructs a new informer for NetworkPolicy type.
@@ -51,23 +53,31 @@ func NewNetworkPolicyInformer(client kubernetes.Interface, namespace string, res
 	return NewFilteredNetworkPolicyInformer(client, namespace, resyncPeriod, indexers, nil)
 }
 
+func NewNetworkPolicyInformerWithMultiTenancy(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tenant string) cache.SharedIndexInformer {
+	return NewFilteredNetworkPolicyInformerWithMultiTenancy(client, namespace, resyncPeriod, indexers, nil, tenant)
+}
+
 // NewFilteredNetworkPolicyInformer constructs a new informer for NetworkPolicy type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
 func NewFilteredNetworkPolicyInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
+	return NewFilteredNetworkPolicyInformerWithMultiTenancy(client, namespace, resyncPeriod, indexers, tweakListOptions, "system")
+}
+
+func NewFilteredNetworkPolicyInformerWithMultiTenancy(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc, tenant string) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ExtensionsV1beta1().NetworkPolicies(namespace).List(options)
+				return client.ExtensionsV1beta1().NetworkPoliciesWithMultiTenancy(namespace, tenant).List(options)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options v1.ListOptions) watch.AggregatedWatchInterface {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ExtensionsV1beta1().NetworkPolicies(namespace).Watch(options)
+				return client.ExtensionsV1beta1().NetworkPoliciesWithMultiTenancy(namespace, tenant).Watch(options)
 			},
 		},
 		&extensionsv1beta1.NetworkPolicy{},
@@ -77,7 +87,7 @@ func NewFilteredNetworkPolicyInformer(client kubernetes.Interface, namespace str
 }
 
 func (f *networkPolicyInformer) defaultInformer(client kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredNetworkPolicyInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewFilteredNetworkPolicyInformerWithMultiTenancy(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions, f.tenant)
 }
 
 func (f *networkPolicyInformer) Informer() cache.SharedIndexInformer {

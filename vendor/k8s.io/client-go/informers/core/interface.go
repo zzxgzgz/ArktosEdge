@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,15 +33,20 @@ type Interface interface {
 type group struct {
 	factory          internalinterfaces.SharedInformerFactory
 	namespace        string
+	tenant           string
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
 }
 
 // New returns a new Interface.
 func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) Interface {
-	return &group{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
+	return &group{factory: f, namespace: namespace, tenant: "system", tweakListOptions: tweakListOptions}
+}
+
+func NewWithMultiTenancy(f internalinterfaces.SharedInformerFactory, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc, tenant string) Interface {
+	return &group{factory: f, namespace: namespace, tenant: tenant, tweakListOptions: tweakListOptions}
 }
 
 // V1 returns a new v1.Interface.
 func (g *group) V1() v1.Interface {
-	return v1.New(g.factory, g.namespace, g.tweakListOptions)
+	return v1.NewWithMultiTenancy(g.factory, g.namespace, g.tweakListOptions, g.tenant)
 }

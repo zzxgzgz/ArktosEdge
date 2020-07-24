@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,45 +19,10 @@ package pods
 
 import (
 	"fmt"
+	"strings"
 
-	"k8s.io/apimachinery/pkg/util/validation/field"
-	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	api "k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/fieldpath"
 )
-
-// ContainerVisitorWithPath is called with each container and the field.Path to that container,
-// and returns true if visiting should continue.
-type ContainerVisitorWithPath func(container *api.Container, path *field.Path) bool
-
-// VisitContainersWithPath invokes the visitor function with a pointer to the spec
-// of every container in the given pod spec and the field.Path to that container.
-// If visitor returns false, visiting is short-circuited. VisitContainersWithPath returns true if visiting completes,
-// false if visiting was short-circuited.
-func VisitContainersWithPath(podSpec *api.PodSpec, visitor ContainerVisitorWithPath) bool {
-	path := field.NewPath("spec", "initContainers")
-	for i := range podSpec.InitContainers {
-		if !visitor(&podSpec.InitContainers[i], path.Index(i)) {
-			return false
-		}
-	}
-	path = field.NewPath("spec", "containers")
-	for i := range podSpec.Containers {
-		if !visitor(&podSpec.Containers[i], path.Index(i)) {
-			return false
-		}
-	}
-	if utilfeature.DefaultFeatureGate.Enabled(features.EphemeralContainers) {
-		path = field.NewPath("spec", "ephemeralContainers")
-		for i := range podSpec.EphemeralContainers {
-			if !visitor((*api.Container)(&podSpec.EphemeralContainers[i].EphemeralContainerCommon), path.Index(i)) {
-				return false
-			}
-		}
-	}
-	return true
-}
 
 // ConvertDownwardAPIFieldLabel converts the specified downward API field label
 // and its value in the pod of the specified version to the internal version,
@@ -82,19 +48,22 @@ func ConvertDownwardAPIFieldLabel(version, label, value string) (string, string,
 		"metadata.name",
 		"metadata.namespace",
 		"metadata.uid",
+		"metadata.hashkey",
 		"spec.nodeName",
 		"spec.restartPolicy",
 		"spec.serviceAccountName",
 		"spec.schedulerName",
 		"status.phase",
 		"status.hostIP",
-		"status.podIP",
-		"status.podIPs":
+		"status.podIP":
 		return label, value, nil
 	// This is for backwards compatibility with old v1 clients which send spec.host
 	case "spec.host":
 		return "spec.nodeName", value, nil
 	default:
+		if strings.HasPrefix(label, "metadata.ownerReferences.") {
+			return label, value, nil
+		}
 		return "", "", fmt.Errorf("field label not supported: %s", label)
 	}
 }

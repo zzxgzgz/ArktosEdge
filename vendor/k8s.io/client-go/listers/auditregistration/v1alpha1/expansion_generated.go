@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,3 +22,7 @@ package v1alpha1
 // AuditSinkListerExpansion allows custom methods to be added to
 // AuditSinkLister.
 type AuditSinkListerExpansion interface{}
+
+// AuditSinkTenantListerExpansion allows custom methods to be added to
+// AuditSinkTenantLister.
+type AuditSinkTenantListerExpansion interface{}

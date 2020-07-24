@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,9 +19,11 @@ package cm
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,7 +34,6 @@ import (
 	libcontainerconfigs "github.com/opencontainers/runc/libcontainer/configs"
 	"k8s.io/klog"
 
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
@@ -49,6 +51,10 @@ const (
 	// systemdSuffix is the cgroup name suffix for systemd
 	systemdSuffix string = ".slice"
 )
+
+// hugePageSizeList is useful for converting to the hugetlb canonical unit
+// which is what is expected when interacting with libcontainer
+var hugePageSizeList = []string{"B", "kB", "MB", "GB", "TB", "PB"}
 
 var RootCgroupName = CgroupName([]string{})
 
@@ -153,7 +159,7 @@ func (l *libcontainerAdapter) newManager(cgroups *libcontainerconfigs.Cgroup, pa
 		if !cgroupsystemd.UseSystemd() {
 			panic("systemd cgroup manager not available")
 		}
-		return &cgroupsystemd.LegacyManager{
+		return &cgroupsystemd.Manager{
 			Cgroups: cgroups,
 			Paths:   paths,
 		}, nil
@@ -303,7 +309,7 @@ func (m *cgroupManagerImpl) Destroy(cgroupConfig *CgroupConfig) error {
 
 	// Delete cgroups using libcontainers Managers Destroy() method
 	if err = manager.Destroy(); err != nil {
-		return fmt.Errorf("unable to destroy cgroup paths for cgroup %v : %v", cgroupConfig.Name, err)
+		return fmt.Errorf("Unable to destroy cgroup paths for cgroup %v : %v", cgroupConfig.Name, err)
 	}
 
 	return nil
@@ -323,7 +329,7 @@ func getSupportedSubsystems() map[subsystem]bool {
 	supportedSubsystems := map[subsystem]bool{
 		&cgroupfs.MemoryGroup{}: true,
 		&cgroupfs.CpuGroup{}:    true,
-		&cgroupfs.PidsGroup{}:   false,
+		&cgroupfs.PidsGroup{}:   true,
 	}
 	// not all hosts support hugetlb cgroup, and in the absent of hugetlb, we will fail silently by reporting no capacity.
 	supportedSubsystems[&cgroupfs.HugetlbGroup{}] = false
@@ -346,14 +352,14 @@ func setSupportedSubsystems(cgroupConfig *libcontainerconfigs.Cgroup) error {
 	for sys, required := range getSupportedSubsystems() {
 		if _, ok := cgroupConfig.Paths[sys.Name()]; !ok {
 			if required {
-				return fmt.Errorf("failed to find subsystem mount for required subsystem: %v", sys.Name())
+				return fmt.Errorf("Failed to find subsystem mount for required subsystem: %v", sys.Name())
 			}
 			// the cgroup is not mounted, but its not required so continue...
 			klog.V(6).Infof("Unable to find subsystem mount for optional subsystem: %v", sys.Name())
 			continue
 		}
 		if err := sys.Set(cgroupConfig.Paths[sys.Name()], cgroupConfig); err != nil {
-			return fmt.Errorf("failed to set config for supported subsystems : %v", err)
+			return fmt.Errorf("Failed to set config for supported subsystems : %v", err)
 		}
 	}
 	return nil
@@ -385,7 +391,7 @@ func (m *cgroupManagerImpl) toResources(resourceConfig *ResourceConfig) *libcont
 	// for each page size enumerated, set that value
 	pageSizes := sets.NewString()
 	for pageSize, limit := range resourceConfig.HugePageLimit {
-		sizeString := units.CustomSize("%g%s", float64(pageSize), 1024.0, libcontainercgroups.HugePageSizeUnitList)
+		sizeString := units.CustomSize("%g%s", float64(pageSize), 1024.0, hugePageSizeList)
 		resources.HugetlbLimit = append(resources.HugetlbLimit, &libcontainerconfigs.HugepageLimit{
 			Pagesize: sizeString,
 			Limit:    uint64(limit),
@@ -484,9 +490,7 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
 
 	// it may confuse why we call set after we do apply, but the issue is that runc
 	// follows a similar pattern.  it's needed to ensure cpu quota is set properly.
-	if err := m.Update(cgroupConfig); err != nil {
-		utilruntime.HandleError(fmt.Errorf("cgroup update failed %v", err))
-	}
+	m.Update(cgroupConfig)
 
 	return nil
 }
@@ -560,14 +564,14 @@ func getStatsSupportedSubsystems(cgroupPaths map[string]string) (*libcontainercg
 	for sys, required := range getSupportedSubsystems() {
 		if _, ok := cgroupPaths[sys.Name()]; !ok {
 			if required {
-				return nil, fmt.Errorf("failed to find subsystem mount for required subsystem: %v", sys.Name())
+				return nil, fmt.Errorf("Failed to find subsystem mount for required subsystem: %v", sys.Name())
 			}
 			// the cgroup is not mounted, but its not required so continue...
 			klog.V(6).Infof("Unable to find subsystem mount for optional subsystem: %v", sys.Name())
 			continue
 		}
 		if err := sys.GetStats(cgroupPaths[sys.Name()], stats); err != nil {
-			return nil, fmt.Errorf("failed to get stats for supported subsystems : %v", err)
+			return nil, fmt.Errorf("Failed to get stats for supported subsystems : %v", err)
 		}
 	}
 	return stats, nil
@@ -589,4 +593,103 @@ func (m *cgroupManagerImpl) GetResourceStats(name CgroupName) (*ResourceStats, e
 		return nil, fmt.Errorf("failed to get stats supported cgroup subsystems for cgroup %v: %v", name, err)
 	}
 	return toResourceStats(stats), nil
+}
+
+func readCgroupFile(dir, file string) (string, error) {
+	data, errRead := ioutil.ReadFile(filepath.Join(dir, file))
+	if errRead != nil {
+		return "", fmt.Errorf("failed to read cgroup file %s in path %s: %v", file, dir, errRead)
+	}
+	return string(data), nil
+}
+
+func readInt64CgroupFile(dir, file string) (int64, error) {
+	data, err := readCgroupFile(dir, file)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseInt(strings.TrimSpace(data), 10, 64)
+}
+
+func readUint64CgroupFile(dir, file string) (uint64, error) {
+	data, err := readCgroupFile(dir, file)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(strings.TrimSpace(data), 10, 64)
+}
+
+// Get the memory limit in bytes applied to the cgroup
+func (m *cgroupManagerImpl) GetCgroupMemoryConfig(name CgroupName) (uint64, error) {
+	cgroupPaths := m.buildCgroupPaths(name)
+	stats, err := getStatsSupportedSubsystems(cgroupPaths)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get stats supported cgroup subsystems for cgroup %v: %v", name, err)
+	}
+	return stats.MemoryStats.Usage.Limit, nil
+}
+
+// Get the cpu quota, cpu period, and cpu shares applied to the cgroup
+func (m *cgroupManagerImpl) GetCgroupCpuConfig(name CgroupName) (int64, uint64, uint64, error) {
+	cgroupPaths := m.buildCgroupPaths(name)
+	cgroupCpuPath, found := cgroupPaths["cpu"]
+	if !found {
+		return 0, 0, 0, fmt.Errorf("failed to build CPU cgroup fs path for cgroup %v", name)
+	}
+	cpuQuota, errQ := readInt64CgroupFile(cgroupCpuPath, "cpu.cfs_quota_us")
+	if errQ != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read CPU quota for cgroup %v: %v", name, errQ)
+	}
+	cpuPeriod, errP := readUint64CgroupFile(cgroupCpuPath, "cpu.cfs_period_us")
+	if errP != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read CPU period for cgroup %v: %v", name, errP)
+	}
+	cpuShares, errS := readUint64CgroupFile(cgroupCpuPath, "cpu.shares")
+	if errP != nil {
+		return 0, 0, 0, fmt.Errorf("failed to read CPU shares for cgroup %v: %v", name, errS)
+	}
+	return cpuQuota, cpuPeriod, cpuShares, nil
+}
+
+// Set the memory limit in bytes applied to the cgroup
+func (m *cgroupManagerImpl) SetCgroupMemoryConfig(name CgroupName, memoryLimit int64) error {
+	cgroupPaths := m.buildCgroupPaths(name)
+	cgroupMemoryPath, found := cgroupPaths["memory"]
+	if !found {
+		return fmt.Errorf("failed to build memory cgroup fs path for cgroup %v", name)
+	}
+	memLimit := strconv.FormatInt(memoryLimit, 10)
+	if err := ioutil.WriteFile(filepath.Join(cgroupMemoryPath, "memory.limit_in_bytes"), []byte(memLimit), 0700); err != nil {
+		return fmt.Errorf("failed to write %v to %v: %v", memLimit, cgroupMemoryPath, err)
+	}
+	return nil
+}
+
+// Set the cpu quota, cpu period, and cpu shares applied to the cgroup
+func (m *cgroupManagerImpl) SetCgroupCpuConfig(name CgroupName, cpuQuota *int64, cpuPeriod, cpuShares *uint64) error {
+	var cpuQuotaStr, cpuPeriodStr, cpuSharesStr string
+	cgroupPaths := m.buildCgroupPaths(name)
+	cgroupCpuPath, found := cgroupPaths["cpu"]
+	if !found {
+		return fmt.Errorf("failed to build cpu cgroup fs path for cgroup %v", name)
+	}
+	if cpuQuota != nil {
+		cpuQuotaStr = strconv.FormatInt(*cpuQuota, 10)
+		if err := ioutil.WriteFile(filepath.Join(cgroupCpuPath, "cpu.cfs_quota_us"), []byte(cpuQuotaStr), 0700); err != nil {
+			return fmt.Errorf("failed to write %v to %v: %v", cpuQuotaStr, cgroupCpuPath, err)
+		}
+	}
+	if cpuPeriod != nil {
+		cpuPeriodStr = strconv.FormatUint(*cpuPeriod, 10)
+		if err := ioutil.WriteFile(filepath.Join(cgroupCpuPath, "cpu.cfs_period_us"), []byte(cpuPeriodStr), 0700); err != nil {
+			return fmt.Errorf("failed to write %v to %v: %v", cpuPeriodStr, cgroupCpuPath, err)
+		}
+	}
+	if cpuShares != nil {
+		cpuSharesStr = strconv.FormatUint(*cpuShares, 10)
+		if err := ioutil.WriteFile(filepath.Join(cgroupCpuPath, "cpu.shares"), []byte(cpuSharesStr), 0700); err != nil {
+			return fmt.Errorf("failed to write %v to %v: %v", cpuSharesStr, cgroupCpuPath, err)
+		}
+	}
+	return nil
 }

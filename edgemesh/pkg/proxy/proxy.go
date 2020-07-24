@@ -10,6 +10,7 @@ import (
 
 	"github.com/vishvananda/netlink"
 	"k8s.io/klog"
+	utildbus "k8s.io/kubernetes/pkg/util/dbus"
 	utiliptables "k8s.io/kubernetes/pkg/util/iptables"
 	utilexec "k8s.io/utils/exec"
 
@@ -37,7 +38,8 @@ var (
 func Init() {
 	protocol := utiliptables.ProtocolIpv4
 	exec := utilexec.New()
-	iptInterface := utiliptables.New(exec, protocol)
+	dbusInterface := utildbus.New()
+	iptInterface := utiliptables.New(exec, dbusInterface, protocol)
 	proxier = &Proxier{
 		iptables:     iptInterface,
 		inboundRule:  "-p tcp -d " + config.Config.SubNet + " -i " + config.Config.ListenInterface + " -j " + meshChain,

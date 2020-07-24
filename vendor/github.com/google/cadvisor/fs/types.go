@@ -20,8 +20,9 @@ import (
 
 type Context struct {
 	// docker root directory.
-	Docker DockerContext
-	Crio   CrioContext
+	Docker  DockerContext
+	RktPath string
+	Crio    CrioContext
 }
 
 type DockerContext struct {

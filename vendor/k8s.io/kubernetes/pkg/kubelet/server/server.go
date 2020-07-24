@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,14 +33,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/emicklei/go-restful"
+	restful "github.com/emicklei/go-restful"
 	cadvisormetrics "github.com/google/cadvisor/container"
 	cadvisorapi "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/metrics"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"k8s.io/klog"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -54,7 +57,6 @@ import (
 	"k8s.io/apiserver/pkg/util/flushwriter"
 	"k8s.io/component-base/logs"
 	compbasemetrics "k8s.io/component-base/metrics"
-	"k8s.io/component-base/metrics/legacyregistry"
 	"k8s.io/kubernetes/pkg/api/legacyscheme"
 	api "k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/v1/validation"
@@ -145,8 +147,6 @@ func ListenAndServeKubeletServer(
 	s := &http.Server{
 		Addr:           net.JoinHostPort(address.String(), strconv.FormatUint(uint64(port), 10)),
 		Handler:        &handler,
-		ReadTimeout:    4 * 60 * time.Minute,
-		WriteTimeout:   4 * 60 * time.Minute,
 		MaxHeaderBytes: 1 << 20,
 	}
 	if tlsOptions != nil {
@@ -206,7 +206,7 @@ type HostInterface interface {
 	LatestLoopEntryTime() time.Time
 	GetExec(podFullName string, podUID types.UID, containerName string, cmd []string, streamOpts remotecommandserver.Options) (*url.URL, error)
 	GetAttach(podFullName string, podUID types.UID, containerName string, streamOpts remotecommandserver.Options) (*url.URL, error)
-	GetPortForward(podName, podNamespace string, podUID types.UID, portForwardOpts portforward.V4Options) (*url.URL, error)
+	GetPortForward(podName, podNamespace, podTenant string, podUID types.UID, portForwardOpts portforward.V4Options) (*url.URL, error)
 }
 
 // NewServer initializes and configures a kubelet.Server object to handle HTTP requests.
@@ -260,7 +260,7 @@ func (s *Server) InstallAuthFilter() {
 		attrs := s.auth.GetRequestAttributes(info.User, req.Request)
 
 		// Authorize
-		decision, _, err := s.auth.Authorize(req.Request.Context(), attrs)
+		decision, _, err := s.auth.Authorize(attrs)
 		if err != nil {
 			msg := fmt.Sprintf("Authorization error (user=%s, verb=%s, resource=%s, subresource=%s)", attrs.GetUser().GetName(), attrs.GetVerb(), attrs.GetResource(), attrs.GetSubresource())
 			klog.Errorf(msg, err)
@@ -297,11 +297,10 @@ func (s *Server) InstallDefaultHandlers(enableCAdvisorJSONEndpoints bool) {
 	s.restfulCont.Add(ws)
 
 	s.restfulCont.Add(stats.CreateHandlers(statsPath, s.host, s.resourceAnalyzer, enableCAdvisorJSONEndpoints))
-	//lint:ignore SA1019 https://github.com/kubernetes/enhancements/issues/1206
-	s.restfulCont.Handle(metricsPath, legacyregistry.Handler())
+	s.restfulCont.Handle(metricsPath, prometheus.Handler())
 
 	// cAdvisor metrics are exposed under the secured handler as well
-	r := compbasemetrics.NewKubeRegistry()
+	r := prometheus.NewRegistry()
 
 	includedMetrics := cadvisormetrics.MetricSet{
 		cadvisormetrics.CpuUsageMetrics:         struct{}{},
@@ -314,24 +313,23 @@ func (s *Server) InstallDefaultHandlers(enableCAdvisorJSONEndpoints bool) {
 		cadvisormetrics.AppMetrics:              struct{}{},
 		cadvisormetrics.ProcessMetrics:          struct{}{},
 	}
-	r.RawMustRegister(metrics.NewPrometheusCollector(prometheusHostAdapter{s.host}, containerPrometheusLabelsFunc(s.host), includedMetrics))
+	r.MustRegister(metrics.NewPrometheusCollector(prometheusHostAdapter{s.host}, containerPrometheusLabelsFunc(s.host), includedMetrics))
 	s.restfulCont.Handle(cadvisorMetricsPath,
-		compbasemetrics.HandlerFor(r, compbasemetrics.HandlerOpts{ErrorHandling: compbasemetrics.ContinueOnError}),
+		promhttp.HandlerFor(r, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}),
 	)
 
-	v1alpha1ResourceRegistry := compbasemetrics.NewKubeRegistry()
-	v1alpha1ResourceRegistry.CustomMustRegister(stats.NewPrometheusResourceMetricCollector(s.resourceAnalyzer, v1alpha1.Config()))
+	v1alpha1ResourceRegistry := prometheus.NewRegistry()
+	v1alpha1ResourceRegistry.MustRegister(stats.NewPrometheusResourceMetricCollector(s.resourceAnalyzer, v1alpha1.Config()))
 	s.restfulCont.Handle(path.Join(resourceMetricsPathPrefix, v1alpha1.Version),
-		compbasemetrics.HandlerFor(v1alpha1ResourceRegistry, compbasemetrics.HandlerOpts{ErrorHandling: compbasemetrics.ContinueOnError}),
+		promhttp.HandlerFor(v1alpha1ResourceRegistry, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}),
 	)
 
 	// prober metrics are exposed under a different endpoint
-
-	p := compbasemetrics.NewKubeRegistry()
-	compbasemetrics.RegisterProcessStartTime(p.RawRegister)
+	p := prometheus.NewRegistry()
+	compbasemetrics.RegisterProcessStartTime(p)
 	p.MustRegister(prober.ProberResults)
 	s.restfulCont.Handle(proberMetricsPath,
-		compbasemetrics.HandlerFor(p, compbasemetrics.HandlerOpts{ErrorHandling: compbasemetrics.ContinueOnError}),
+		promhttp.HandlerFor(p, promhttp.HandlerOpts{ErrorHandling: promhttp.ContinueOnError}),
 	)
 
 	if enableCAdvisorJSONEndpoints {
@@ -356,10 +354,10 @@ func (s *Server) InstallDebuggingHandlers(criHandler http.Handler) {
 	ws := new(restful.WebService)
 	ws.
 		Path("/run")
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{containerName}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{containerName}").
 		To(s.getRun).
 		Operation("getRun"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{uid}/{containerName}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{uid}/{containerName}").
 		To(s.getRun).
 		Operation("getRun"))
 	s.restfulCont.Add(ws)
@@ -367,16 +365,16 @@ func (s *Server) InstallDebuggingHandlers(criHandler http.Handler) {
 	ws = new(restful.WebService)
 	ws.
 		Path("/exec")
-	ws.Route(ws.GET("/{podNamespace}/{podID}/{containerName}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}/{containerName}").
 		To(s.getExec).
 		Operation("getExec"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{containerName}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{containerName}").
 		To(s.getExec).
 		Operation("getExec"))
-	ws.Route(ws.GET("/{podNamespace}/{podID}/{uid}/{containerName}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}/{uid}/{containerName}").
 		To(s.getExec).
 		Operation("getExec"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{uid}/{containerName}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{uid}/{containerName}").
 		To(s.getExec).
 		Operation("getExec"))
 	s.restfulCont.Add(ws)
@@ -384,16 +382,16 @@ func (s *Server) InstallDebuggingHandlers(criHandler http.Handler) {
 	ws = new(restful.WebService)
 	ws.
 		Path("/attach")
-	ws.Route(ws.GET("/{podNamespace}/{podID}/{containerName}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}/{containerName}").
 		To(s.getAttach).
 		Operation("getAttach"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{containerName}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{containerName}").
 		To(s.getAttach).
 		Operation("getAttach"))
-	ws.Route(ws.GET("/{podNamespace}/{podID}/{uid}/{containerName}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}/{uid}/{containerName}").
 		To(s.getAttach).
 		Operation("getAttach"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{uid}/{containerName}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{uid}/{containerName}").
 		To(s.getAttach).
 		Operation("getAttach"))
 	s.restfulCont.Add(ws)
@@ -401,16 +399,16 @@ func (s *Server) InstallDebuggingHandlers(criHandler http.Handler) {
 	ws = new(restful.WebService)
 	ws.
 		Path("/portForward")
-	ws.Route(ws.GET("/{podNamespace}/{podID}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}").
 		To(s.getPortForward).
 		Operation("getPortForward"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}").
 		To(s.getPortForward).
 		Operation("getPortForward"))
-	ws.Route(ws.GET("/{podNamespace}/{podID}/{uid}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}/{uid}").
 		To(s.getPortForward).
 		Operation("getPortForward"))
-	ws.Route(ws.POST("/{podNamespace}/{podID}/{uid}").
+	ws.Route(ws.POST("/{podTenant}/{podNamespace}/{podID}/{uid}").
 		To(s.getPortForward).
 		Operation("getPortForward"))
 	s.restfulCont.Add(ws)
@@ -430,7 +428,7 @@ func (s *Server) InstallDebuggingHandlers(criHandler http.Handler) {
 	ws = new(restful.WebService)
 	ws.
 		Path("/containerLogs")
-	ws.Route(ws.GET("/{podNamespace}/{podID}/{containerName}").
+	ws.Route(ws.GET("/{podTenant}/{podNamespace}/{podID}/{containerName}").
 		To(s.getContainerLogs).
 		Operation("getContainerLogs"))
 	s.restfulCont.Add(ws)
@@ -509,6 +507,7 @@ func (s *Server) syncLoopHealthCheck(req *http.Request) error {
 
 // getContainerLogs handles containerLogs request against the Kubelet
 func (s *Server) getContainerLogs(request *restful.Request, response *restful.Response) {
+	podTenant := request.PathParameter("podTenant")
 	podNamespace := request.PathParameter("podNamespace")
 	podID := request.PathParameter("podID")
 	containerName := request.PathParameter("containerName")
@@ -528,6 +527,11 @@ func (s *Server) getContainerLogs(request *restful.Request, response *restful.Re
 	if len(podNamespace) == 0 {
 		// TODO: Why return JSON when the rest return plaintext errors?
 		response.WriteError(http.StatusBadRequest, fmt.Errorf(`{"message": "Missing podNamespace."}`))
+		return
+	}
+	if len(podTenant) == 0 {
+		// TODO: Why return JSON when the rest return plaintext errors?
+		response.WriteError(http.StatusBadRequest, fmt.Errorf(`{"message": "Missing podTenant."}`))
 		return
 	}
 
@@ -552,13 +556,28 @@ func (s *Server) getContainerLogs(request *restful.Request, response *restful.Re
 		return
 	}
 
-	pod, ok := s.host.GetPodByName(podNamespace, podID)
+	pod, ok := s.host.GetPodByName(podTenant, podNamespace, podID)
 	if !ok {
 		response.WriteError(http.StatusNotFound, fmt.Errorf("pod %q does not exist", podID))
 		return
 	}
 	// Check if containerName is valid.
-	if kubecontainer.GetContainerSpec(pod, containerName) == nil {
+	containerExists := false
+	for _, container := range pod.Spec.Containers {
+		if container.Name == containerName {
+			containerExists = true
+			break
+		}
+	}
+	if !containerExists {
+		for _, container := range pod.Spec.InitContainers {
+			if container.Name == containerName {
+				containerExists = true
+				break
+			}
+		}
+	}
+	if !containerExists {
 		response.WriteError(http.StatusNotFound, fmt.Errorf("container %q not found in pod %q", containerName, podID))
 		return
 	}
@@ -633,6 +652,7 @@ func (s *Server) getSpec(request *restful.Request, response *restful.Response) {
 }
 
 type execRequestParams struct {
+	podTenant     string
 	podNamespace  string
 	podName       string
 	podUID        types.UID
@@ -642,6 +662,7 @@ type execRequestParams struct {
 
 func getExecRequestParams(req *restful.Request) execRequestParams {
 	return execRequestParams{
+		podTenant:     req.PathParameter("podTenant"),
 		podNamespace:  req.PathParameter("podNamespace"),
 		podName:       req.PathParameter("podID"),
 		podUID:        types.UID(req.PathParameter("uid")),
@@ -651,6 +672,7 @@ func getExecRequestParams(req *restful.Request) execRequestParams {
 }
 
 type portForwardRequestParams struct {
+	podTenant    string
 	podNamespace string
 	podName      string
 	podUID       types.UID
@@ -658,13 +680,16 @@ type portForwardRequestParams struct {
 
 func getPortForwardRequestParams(req *restful.Request) portForwardRequestParams {
 	return portForwardRequestParams{
+		podTenant:    req.PathParameter("podTenant"),
 		podNamespace: req.PathParameter("podNamespace"),
 		podName:      req.PathParameter("podID"),
 		podUID:       types.UID(req.PathParameter("uid")),
 	}
 }
 
-type responder struct{}
+type responder struct {
+	errorMessage string
+}
 
 func (r *responder) Error(w http.ResponseWriter, req *http.Request, err error) {
 	klog.Errorf("Error while proxying request: %v", err)
@@ -687,7 +712,7 @@ func (s *Server) getAttach(request *restful.Request, response *restful.Response)
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}
-	pod, ok := s.host.GetPodByName(params.podNamespace, params.podName)
+	pod, ok := s.host.GetPodByName(params.podTenant, params.podNamespace, params.podName)
 	if !ok {
 		response.WriteError(http.StatusNotFound, fmt.Errorf("pod does not exist"))
 		return
@@ -716,7 +741,7 @@ func (s *Server) getExec(request *restful.Request, response *restful.Response) {
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}
-	pod, ok := s.host.GetPodByName(params.podNamespace, params.podName)
+	pod, ok := s.host.GetPodByName(params.podTenant, params.podNamespace, params.podName)
 	if !ok {
 		response.WriteError(http.StatusNotFound, fmt.Errorf("pod does not exist"))
 		return
@@ -738,7 +763,7 @@ func (s *Server) getExec(request *restful.Request, response *restful.Response) {
 // getRun handles requests to run a command inside a container.
 func (s *Server) getRun(request *restful.Request, response *restful.Response) {
 	params := getExecRequestParams(request)
-	pod, ok := s.host.GetPodByName(params.podNamespace, params.podName)
+	pod, ok := s.host.GetPodByName(params.podTenant, params.podNamespace, params.podName)
 	if !ok {
 		response.WriteError(http.StatusNotFound, fmt.Errorf("pod does not exist"))
 		return
@@ -779,7 +804,7 @@ func (s *Server) getPortForward(request *restful.Request, response *restful.Resp
 		response.WriteError(http.StatusBadRequest, err)
 		return
 	}
-	pod, ok := s.host.GetPodByName(params.podNamespace, params.podName)
+	pod, ok := s.host.GetPodByName(params.podTenant, params.podNamespace, params.podName)
 	if !ok {
 		response.WriteError(http.StatusNotFound, fmt.Errorf("pod does not exist"))
 		return
@@ -789,7 +814,7 @@ func (s *Server) getPortForward(request *restful.Request, response *restful.Resp
 		return
 	}
 
-	url, err := s.host.GetPortForward(pod.Name, pod.Namespace, pod.UID, *portForwardOptions)
+	url, err := s.host.GetPortForward(pod.Name, pod.Namespace, pod.Tenant, pod.UID, *portForwardOptions)
 	if err != nil {
 		streaming.WriteError(err, response.ResponseWriter)
 		return
@@ -842,7 +867,7 @@ var statusesNoTracePred = httplog.StatusIsNot(
 
 // ServeHTTP responds to HTTP requests on the Kubelet.
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	handler := httplog.WithLogging(s.restfulCont, statusesNoTracePred)
+	defer httplog.NewLogged(req, &w).StacktraceWhen(statusesNoTracePred).Log()
 
 	// monitor http requests
 	var serverType string
@@ -864,7 +889,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	startTime := time.Now()
 	defer servermetrics.HTTPRequestsDuration.WithLabelValues(method, path, serverType, longRunning).Observe(servermetrics.SinceInSeconds(startTime))
 
-	handler.ServeHTTP(w, req)
+	s.restfulCont.ServeHTTP(w, req)
 }
 
 // prometheusHostAdapter adapts the HostInterface to the interface expected by the
@@ -893,7 +918,7 @@ func containerPrometheusLabelsFunc(s stats.Provider) metrics.ContainerLabelsFunc
 	return func(c *cadvisorapi.ContainerInfo) map[string]string {
 		// Prometheus requires that all metrics in the same family have the same labels,
 		// so we arrange to supply blank strings for missing labels
-		var name, image, podName, namespace, containerName string
+		var name, image, podName, namespace, tenant, containerName string
 		if len(c.Aliases) > 0 {
 			name = c.Aliases[0]
 		}
@@ -904,22 +929,29 @@ func containerPrometheusLabelsFunc(s stats.Provider) metrics.ContainerLabelsFunc
 		if v, ok := c.Spec.Labels[kubelettypes.KubernetesPodNamespaceLabel]; ok {
 			namespace = v
 		}
+		if v, ok := c.Spec.Labels[kubelettypes.KubernetesPodTenantLabel]; ok {
+			tenant = v
+		}
 		if v, ok := c.Spec.Labels[kubelettypes.KubernetesContainerNameLabel]; ok {
 			containerName = v
 		}
 		// Associate pod cgroup with pod so we have an accurate accounting of sandbox
-		if podName == "" && namespace == "" {
+		if podName == "" && namespace == "" && tenant == "" {
 			if pod, found := s.GetPodByCgroupfs(c.Name); found {
 				podName = pod.Name
 				namespace = pod.Namespace
+				tenant = pod.Tenant
 			}
 		}
 		set := map[string]string{
 			metrics.LabelID:    c.Name,
 			metrics.LabelName:  name,
 			metrics.LabelImage: image,
+			"pod_name":         podName,
 			"pod":              podName,
 			"namespace":        namespace,
+			"tenant":           tenant,
+			"container_name":   containerName,
 			"container":        containerName,
 		}
 		return set

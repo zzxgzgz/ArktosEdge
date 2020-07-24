@@ -4,9 +4,10 @@ import (
 	gocontext "context"
 	"encoding/json"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/errors"
 	"os"
 	"syscall"
+
+	"k8s.io/apimachinery/pkg/api/errors"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,8 +100,8 @@ func makeLeaderElectionConfig(config componentbaseconfig.LeaderElectionConfigura
 	id := hostname + "_" + string(uuid.NewUUID())
 
 	rl, err := resourcelock.New(config.ResourceLock,
-		config.ResourceNamespace,
-		config.ResourceName,
+		"", // config.ResourceNamespace,
+		"", // config.ResourceName,
 		client.CoreV1(),
 		client.CoordinationV1(),
 		resourcelock.ResourceLockConfig{

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,7 +17,9 @@ limitations under the License.
 
 package secret
 
-import v1 "k8s.io/api/core/v1"
+import (
+	"k8s.io/api/core/v1"
+)
 
 // fakeManager implements Manager interface for testing purposes.
 // simple operations to apiserver.
@@ -28,15 +31,12 @@ func NewFakeManager() Manager {
 	return &fakeManager{}
 }
 
-// GetSecret returns a nil secret for testing
-func (s *fakeManager) GetSecret(namespace, name string) (*v1.Secret, error) {
+func (s *fakeManager) GetSecret(tenant, namespace, name string) (*v1.Secret, error) {
 	return nil, nil
 }
 
-// RegisterPod implements the RegisterPod method for testing purposes.
 func (s *fakeManager) RegisterPod(pod *v1.Pod) {
 }
 
-// UnregisterPod implements the UnregisterPod method for testing purposes.
 func (s *fakeManager) UnregisterPod(pod *v1.Pod) {
 }

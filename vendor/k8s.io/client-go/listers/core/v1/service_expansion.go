@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,7 +35,7 @@ type ServiceNamespaceListerExpansion interface{}
 // TODO: Move this back to scheduler as a helper function that takes a Store,
 // rather than a method of ServiceLister.
 func (s *serviceLister) GetPodServices(pod *v1.Pod) ([]*v1.Service, error) {
-	allServices, err := s.Services(pod.Namespace).List(labels.Everything())
+	allServices, err := s.ServicesWithMultiTenancy(pod.Namespace, pod.Tenant).List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}

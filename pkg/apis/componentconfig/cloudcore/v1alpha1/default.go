@@ -151,13 +151,13 @@ func NewDefaultCloudCoreConfig() *CloudCoreConfig {
 			},
 		},
 		LeaderElection: &componentbaseconfig.LeaderElectionConfiguration{
-			LeaderElect:       false,
-			LeaseDuration:     metav1.Duration{Duration: 15 * time.Second},
-			RenewDeadline:     metav1.Duration{Duration: 10 * time.Second},
-			RetryPeriod:       metav1.Duration{Duration: 2 * time.Second},
-			ResourceLock:      "endpointsleases",
-			ResourceNamespace: constants.KubeEdgeNameSpace,
-			ResourceName:      "cloudcorelease",
+			LeaderElect:   false,
+			LeaseDuration: metav1.Duration{Duration: 15 * time.Second},
+			RenewDeadline: metav1.Duration{Duration: 10 * time.Second},
+			RetryPeriod:   metav1.Duration{Duration: 2 * time.Second},
+			ResourceLock:  "endpointsleases",
+			// ResourceNamespace: constants.KubeEdgeNameSpace,
+			// ResourceName:      "cloudcorelease",
 		},
 	}
 	return c

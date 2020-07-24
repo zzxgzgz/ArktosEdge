@@ -1,5 +1,6 @@
 /*
 Copyright 2018 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,6 +31,7 @@ type ServiceAccountExpansion interface {
 func (c *serviceAccounts) CreateToken(name string, tr *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
 	result := &authenticationv1.TokenRequest{}
 	err := c.client.Post().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("serviceaccounts").
 		SubResource("token").

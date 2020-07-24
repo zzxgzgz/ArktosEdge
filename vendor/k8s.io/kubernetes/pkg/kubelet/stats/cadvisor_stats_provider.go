@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -118,7 +119,7 @@ func (p *cadvisorStatsProvider) ListPodStats() ([]statsapi.PodStats, error) {
 		if containerName == leaky.PodInfraContainerName {
 			// Special case for infrastructure container which is hidden from
 			// the user and has network stats.
-			podStats.Network = cadvisorInfoToNetworkStats("pod:"+ref.Namespace+"_"+ref.Name, &cinfo)
+			podStats.Network = cadvisorInfoToNetworkStats("pod:"+ref.Tenant+"_"+ref.Namespace+"_"+ref.Name, &cinfo)
 		} else {
 			podStats.Containers = append(podStats.Containers, *cadvisorInfoToContainerStats(containerName, &cinfo, &rootFsInfo, &imageFsInfo))
 		}
@@ -255,6 +256,8 @@ func (p *cadvisorStatsProvider) ImageFsStats() (*statsapi.FsStats, error) {
 
 // ImageFsDevice returns name of the device where the image filesystem locates,
 // e.g. /dev/sda1.
+// TODO: support multiple image FS
+// Arktos issue 350
 func (p *cadvisorStatsProvider) ImageFsDevice() (string, error) {
 	imageFsInfo, err := p.cadvisor.ImagesFsInfo()
 	if err != nil {
@@ -267,8 +270,9 @@ func (p *cadvisorStatsProvider) ImageFsDevice() (string, error) {
 func buildPodRef(containerLabels map[string]string) statsapi.PodReference {
 	podName := kubetypes.GetPodName(containerLabels)
 	podNamespace := kubetypes.GetPodNamespace(containerLabels)
+	podTenant := kubetypes.GetPodTenant(containerLabels)
 	podUID := kubetypes.GetPodUID(containerLabels)
-	return statsapi.PodReference{Name: podName, Namespace: podNamespace, UID: podUID}
+	return statsapi.PodReference{Name: podName, Namespace: podNamespace, Tenant: podTenant, UID: podUID}
 }
 
 // isPodManagedContainer returns true if the cinfo container is managed by a Pod

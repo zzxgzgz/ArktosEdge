@@ -2,6 +2,7 @@
 
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,7 +34,6 @@ func RegisterDefaults(scheme *runtime.Scheme) error {
 	scheme.AddTypeDefaultingFunc(&v1.ConfigMapList{}, func(obj interface{}) { SetObjectDefaults_ConfigMapList(obj.(*v1.ConfigMapList)) })
 	scheme.AddTypeDefaultingFunc(&v1.Endpoints{}, func(obj interface{}) { SetObjectDefaults_Endpoints(obj.(*v1.Endpoints)) })
 	scheme.AddTypeDefaultingFunc(&v1.EndpointsList{}, func(obj interface{}) { SetObjectDefaults_EndpointsList(obj.(*v1.EndpointsList)) })
-	scheme.AddTypeDefaultingFunc(&v1.EphemeralContainers{}, func(obj interface{}) { SetObjectDefaults_EphemeralContainers(obj.(*v1.EphemeralContainers)) })
 	scheme.AddTypeDefaultingFunc(&v1.LimitRange{}, func(obj interface{}) { SetObjectDefaults_LimitRange(obj.(*v1.LimitRange)) })
 	scheme.AddTypeDefaultingFunc(&v1.LimitRangeList{}, func(obj interface{}) { SetObjectDefaults_LimitRangeList(obj.(*v1.LimitRangeList)) })
 	scheme.AddTypeDefaultingFunc(&v1.Namespace{}, func(obj interface{}) { SetObjectDefaults_Namespace(obj.(*v1.Namespace)) })
@@ -48,6 +48,7 @@ func RegisterDefaults(scheme *runtime.Scheme) error {
 	scheme.AddTypeDefaultingFunc(&v1.PersistentVolumeList{}, func(obj interface{}) { SetObjectDefaults_PersistentVolumeList(obj.(*v1.PersistentVolumeList)) })
 	scheme.AddTypeDefaultingFunc(&v1.Pod{}, func(obj interface{}) { SetObjectDefaults_Pod(obj.(*v1.Pod)) })
 	scheme.AddTypeDefaultingFunc(&v1.PodList{}, func(obj interface{}) { SetObjectDefaults_PodList(obj.(*v1.PodList)) })
+	scheme.AddTypeDefaultingFunc(&v1.PodStatusResult{}, func(obj interface{}) { SetObjectDefaults_PodStatusResult(obj.(*v1.PodStatusResult)) })
 	scheme.AddTypeDefaultingFunc(&v1.PodTemplate{}, func(obj interface{}) { SetObjectDefaults_PodTemplate(obj.(*v1.PodTemplate)) })
 	scheme.AddTypeDefaultingFunc(&v1.PodTemplateList{}, func(obj interface{}) { SetObjectDefaults_PodTemplateList(obj.(*v1.PodTemplateList)) })
 	scheme.AddTypeDefaultingFunc(&v1.ReplicationController{}, func(obj interface{}) { SetObjectDefaults_ReplicationController(obj.(*v1.ReplicationController)) })
@@ -60,6 +61,8 @@ func RegisterDefaults(scheme *runtime.Scheme) error {
 	scheme.AddTypeDefaultingFunc(&v1.SecretList{}, func(obj interface{}) { SetObjectDefaults_SecretList(obj.(*v1.SecretList)) })
 	scheme.AddTypeDefaultingFunc(&v1.Service{}, func(obj interface{}) { SetObjectDefaults_Service(obj.(*v1.Service)) })
 	scheme.AddTypeDefaultingFunc(&v1.ServiceList{}, func(obj interface{}) { SetObjectDefaults_ServiceList(obj.(*v1.ServiceList)) })
+	scheme.AddTypeDefaultingFunc(&v1.Tenant{}, func(obj interface{}) { SetObjectDefaults_Tenant(obj.(*v1.Tenant)) })
+	scheme.AddTypeDefaultingFunc(&v1.TenantList{}, func(obj interface{}) { SetObjectDefaults_TenantList(obj.(*v1.TenantList)) })
 	return nil
 }
 
@@ -82,56 +85,6 @@ func SetObjectDefaults_EndpointsList(in *v1.EndpointsList) {
 	for i := range in.Items {
 		a := &in.Items[i]
 		SetObjectDefaults_Endpoints(a)
-	}
-}
-
-func SetObjectDefaults_EphemeralContainers(in *v1.EphemeralContainers) {
-	for i := range in.EphemeralContainers {
-		a := &in.EphemeralContainers[i]
-		for j := range a.EphemeralContainerCommon.Ports {
-			b := &a.EphemeralContainerCommon.Ports[j]
-			SetDefaults_ContainerPort(b)
-		}
-		for j := range a.EphemeralContainerCommon.Env {
-			b := &a.EphemeralContainerCommon.Env[j]
-			if b.ValueFrom != nil {
-				if b.ValueFrom.FieldRef != nil {
-					SetDefaults_ObjectFieldSelector(b.ValueFrom.FieldRef)
-				}
-			}
-		}
-		SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
-		SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
-		if a.EphemeralContainerCommon.LivenessProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
-			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.ReadinessProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.ReadinessProbe)
-			if a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.StartupProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.StartupProbe)
-			if a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.Lifecycle != nil {
-			if a.EphemeralContainerCommon.Lifecycle.PostStart != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet)
-				}
-			}
-			if a.EphemeralContainerCommon.Lifecycle.PreStop != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet)
-				}
-			}
-		}
 	}
 }
 
@@ -290,6 +243,7 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 		}
 		SetDefaults_ResourceList(&a.Resources.Limits)
 		SetDefaults_ResourceList(&a.Resources.Requests)
+		SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -300,12 +254,6 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 			SetDefaults_Probe(a.ReadinessProbe)
 			if a.ReadinessProbe.Handler.HTTPGet != nil {
 				SetDefaults_HTTPGetAction(a.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.StartupProbe != nil {
-			SetDefaults_Probe(a.StartupProbe)
-			if a.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.StartupProbe.Handler.HTTPGet)
 			}
 		}
 		if a.Lifecycle != nil {
@@ -338,6 +286,7 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 		}
 		SetDefaults_ResourceList(&a.Resources.Limits)
 		SetDefaults_ResourceList(&a.Resources.Requests)
+		SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -348,12 +297,6 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 			SetDefaults_Probe(a.ReadinessProbe)
 			if a.ReadinessProbe.Handler.HTTPGet != nil {
 				SetDefaults_HTTPGetAction(a.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.StartupProbe != nil {
-			SetDefaults_Probe(a.StartupProbe)
-			if a.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.StartupProbe.Handler.HTTPGet)
 			}
 		}
 		if a.Lifecycle != nil {
@@ -369,60 +312,54 @@ func SetObjectDefaults_Pod(in *v1.Pod) {
 			}
 		}
 	}
-	for i := range in.Spec.EphemeralContainers {
-		a := &in.Spec.EphemeralContainers[i]
-		for j := range a.EphemeralContainerCommon.Ports {
-			b := &a.EphemeralContainerCommon.Ports[j]
-			SetDefaults_ContainerPort(b)
-		}
-		for j := range a.EphemeralContainerCommon.Env {
-			b := &a.EphemeralContainerCommon.Env[j]
-			if b.ValueFrom != nil {
-				if b.ValueFrom.FieldRef != nil {
-					SetDefaults_ObjectFieldSelector(b.ValueFrom.FieldRef)
-				}
-			}
-		}
-		SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
-		SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
-		if a.EphemeralContainerCommon.LivenessProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
-			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.ReadinessProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.ReadinessProbe)
-			if a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.StartupProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.StartupProbe)
-			if a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.Lifecycle != nil {
-			if a.EphemeralContainerCommon.Lifecycle.PostStart != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet)
-				}
-			}
-			if a.EphemeralContainerCommon.Lifecycle.PreStop != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet)
-				}
-			}
-		}
+	if in.Spec.VirtualMachine != nil {
+		SetDefaults_ResourceList(&in.Spec.VirtualMachine.Resources.Limits)
+		SetDefaults_ResourceList(&in.Spec.VirtualMachine.Resources.Requests)
+		SetDefaults_ResourceList(&in.Spec.VirtualMachine.ResourcesAllocated)
 	}
-	SetDefaults_ResourceList(&in.Spec.Overhead)
+	for i := range in.Spec.WorkloadInfo {
+		a := &in.Spec.WorkloadInfo[i]
+		SetDefaults_ResourceList(&a.Resources.Limits)
+		SetDefaults_ResourceList(&a.Resources.Requests)
+		SetDefaults_ResourceList(&a.ResourcesAllocated)
+	}
+	for i := range in.Status.InitContainerStatuses {
+		a := &in.Status.InitContainerStatuses[i]
+		SetDefaults_ResourceList(&a.Resources.Limits)
+		SetDefaults_ResourceList(&a.Resources.Requests)
+	}
+	for i := range in.Status.ContainerStatuses {
+		a := &in.Status.ContainerStatuses[i]
+		SetDefaults_ResourceList(&a.Resources.Limits)
+		SetDefaults_ResourceList(&a.Resources.Requests)
+	}
+	if in.Status.VirtualMachineStatus != nil {
+		SetDefaults_ResourceList(&in.Status.VirtualMachineStatus.Resources.Limits)
+		SetDefaults_ResourceList(&in.Status.VirtualMachineStatus.Resources.Requests)
+	}
 }
 
 func SetObjectDefaults_PodList(in *v1.PodList) {
 	for i := range in.Items {
 		a := &in.Items[i]
 		SetObjectDefaults_Pod(a)
+	}
+}
+
+func SetObjectDefaults_PodStatusResult(in *v1.PodStatusResult) {
+	for i := range in.Status.InitContainerStatuses {
+		a := &in.Status.InitContainerStatuses[i]
+		SetDefaults_ResourceList(&a.Resources.Limits)
+		SetDefaults_ResourceList(&a.Resources.Requests)
+	}
+	for i := range in.Status.ContainerStatuses {
+		a := &in.Status.ContainerStatuses[i]
+		SetDefaults_ResourceList(&a.Resources.Limits)
+		SetDefaults_ResourceList(&a.Resources.Requests)
+	}
+	if in.Status.VirtualMachineStatus != nil {
+		SetDefaults_ResourceList(&in.Status.VirtualMachineStatus.Resources.Limits)
+		SetDefaults_ResourceList(&in.Status.VirtualMachineStatus.Resources.Requests)
 	}
 }
 
@@ -496,6 +433,7 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 		}
 		SetDefaults_ResourceList(&a.Resources.Limits)
 		SetDefaults_ResourceList(&a.Resources.Requests)
+		SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -506,12 +444,6 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 			SetDefaults_Probe(a.ReadinessProbe)
 			if a.ReadinessProbe.Handler.HTTPGet != nil {
 				SetDefaults_HTTPGetAction(a.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.StartupProbe != nil {
-			SetDefaults_Probe(a.StartupProbe)
-			if a.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.StartupProbe.Handler.HTTPGet)
 			}
 		}
 		if a.Lifecycle != nil {
@@ -544,6 +476,7 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 		}
 		SetDefaults_ResourceList(&a.Resources.Limits)
 		SetDefaults_ResourceList(&a.Resources.Requests)
+		SetDefaults_ResourceList(&a.ResourcesAllocated)
 		if a.LivenessProbe != nil {
 			SetDefaults_Probe(a.LivenessProbe)
 			if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -554,12 +487,6 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 			SetDefaults_Probe(a.ReadinessProbe)
 			if a.ReadinessProbe.Handler.HTTPGet != nil {
 				SetDefaults_HTTPGetAction(a.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.StartupProbe != nil {
-			SetDefaults_Probe(a.StartupProbe)
-			if a.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.StartupProbe.Handler.HTTPGet)
 			}
 		}
 		if a.Lifecycle != nil {
@@ -575,54 +502,17 @@ func SetObjectDefaults_PodTemplate(in *v1.PodTemplate) {
 			}
 		}
 	}
-	for i := range in.Template.Spec.EphemeralContainers {
-		a := &in.Template.Spec.EphemeralContainers[i]
-		for j := range a.EphemeralContainerCommon.Ports {
-			b := &a.EphemeralContainerCommon.Ports[j]
-			SetDefaults_ContainerPort(b)
-		}
-		for j := range a.EphemeralContainerCommon.Env {
-			b := &a.EphemeralContainerCommon.Env[j]
-			if b.ValueFrom != nil {
-				if b.ValueFrom.FieldRef != nil {
-					SetDefaults_ObjectFieldSelector(b.ValueFrom.FieldRef)
-				}
-			}
-		}
-		SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
-		SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
-		if a.EphemeralContainerCommon.LivenessProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
-			if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.ReadinessProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.ReadinessProbe)
-			if a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.StartupProbe != nil {
-			SetDefaults_Probe(a.EphemeralContainerCommon.StartupProbe)
-			if a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet != nil {
-				SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet)
-			}
-		}
-		if a.EphemeralContainerCommon.Lifecycle != nil {
-			if a.EphemeralContainerCommon.Lifecycle.PostStart != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet)
-				}
-			}
-			if a.EphemeralContainerCommon.Lifecycle.PreStop != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet)
-				}
-			}
-		}
+	if in.Template.Spec.VirtualMachine != nil {
+		SetDefaults_ResourceList(&in.Template.Spec.VirtualMachine.Resources.Limits)
+		SetDefaults_ResourceList(&in.Template.Spec.VirtualMachine.Resources.Requests)
+		SetDefaults_ResourceList(&in.Template.Spec.VirtualMachine.ResourcesAllocated)
 	}
-	SetDefaults_ResourceList(&in.Template.Spec.Overhead)
+	for i := range in.Template.Spec.WorkloadInfo {
+		a := &in.Template.Spec.WorkloadInfo[i]
+		SetDefaults_ResourceList(&a.Resources.Limits)
+		SetDefaults_ResourceList(&a.Resources.Requests)
+		SetDefaults_ResourceList(&a.ResourcesAllocated)
+	}
 }
 
 func SetObjectDefaults_PodTemplateList(in *v1.PodTemplateList) {
@@ -704,6 +594,7 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 			}
 			SetDefaults_ResourceList(&a.Resources.Limits)
 			SetDefaults_ResourceList(&a.Resources.Requests)
+			SetDefaults_ResourceList(&a.ResourcesAllocated)
 			if a.LivenessProbe != nil {
 				SetDefaults_Probe(a.LivenessProbe)
 				if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -714,12 +605,6 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 				SetDefaults_Probe(a.ReadinessProbe)
 				if a.ReadinessProbe.Handler.HTTPGet != nil {
 					SetDefaults_HTTPGetAction(a.ReadinessProbe.Handler.HTTPGet)
-				}
-			}
-			if a.StartupProbe != nil {
-				SetDefaults_Probe(a.StartupProbe)
-				if a.StartupProbe.Handler.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.StartupProbe.Handler.HTTPGet)
 				}
 			}
 			if a.Lifecycle != nil {
@@ -752,6 +637,7 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 			}
 			SetDefaults_ResourceList(&a.Resources.Limits)
 			SetDefaults_ResourceList(&a.Resources.Requests)
+			SetDefaults_ResourceList(&a.ResourcesAllocated)
 			if a.LivenessProbe != nil {
 				SetDefaults_Probe(a.LivenessProbe)
 				if a.LivenessProbe.Handler.HTTPGet != nil {
@@ -762,12 +648,6 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 				SetDefaults_Probe(a.ReadinessProbe)
 				if a.ReadinessProbe.Handler.HTTPGet != nil {
 					SetDefaults_HTTPGetAction(a.ReadinessProbe.Handler.HTTPGet)
-				}
-			}
-			if a.StartupProbe != nil {
-				SetDefaults_Probe(a.StartupProbe)
-				if a.StartupProbe.Handler.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.StartupProbe.Handler.HTTPGet)
 				}
 			}
 			if a.Lifecycle != nil {
@@ -783,54 +663,17 @@ func SetObjectDefaults_ReplicationController(in *v1.ReplicationController) {
 				}
 			}
 		}
-		for i := range in.Spec.Template.Spec.EphemeralContainers {
-			a := &in.Spec.Template.Spec.EphemeralContainers[i]
-			for j := range a.EphemeralContainerCommon.Ports {
-				b := &a.EphemeralContainerCommon.Ports[j]
-				SetDefaults_ContainerPort(b)
-			}
-			for j := range a.EphemeralContainerCommon.Env {
-				b := &a.EphemeralContainerCommon.Env[j]
-				if b.ValueFrom != nil {
-					if b.ValueFrom.FieldRef != nil {
-						SetDefaults_ObjectFieldSelector(b.ValueFrom.FieldRef)
-					}
-				}
-			}
-			SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Limits)
-			SetDefaults_ResourceList(&a.EphemeralContainerCommon.Resources.Requests)
-			if a.EphemeralContainerCommon.LivenessProbe != nil {
-				SetDefaults_Probe(a.EphemeralContainerCommon.LivenessProbe)
-				if a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.LivenessProbe.Handler.HTTPGet)
-				}
-			}
-			if a.EphemeralContainerCommon.ReadinessProbe != nil {
-				SetDefaults_Probe(a.EphemeralContainerCommon.ReadinessProbe)
-				if a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.ReadinessProbe.Handler.HTTPGet)
-				}
-			}
-			if a.EphemeralContainerCommon.StartupProbe != nil {
-				SetDefaults_Probe(a.EphemeralContainerCommon.StartupProbe)
-				if a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet != nil {
-					SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.StartupProbe.Handler.HTTPGet)
-				}
-			}
-			if a.EphemeralContainerCommon.Lifecycle != nil {
-				if a.EphemeralContainerCommon.Lifecycle.PostStart != nil {
-					if a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet != nil {
-						SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PostStart.HTTPGet)
-					}
-				}
-				if a.EphemeralContainerCommon.Lifecycle.PreStop != nil {
-					if a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet != nil {
-						SetDefaults_HTTPGetAction(a.EphemeralContainerCommon.Lifecycle.PreStop.HTTPGet)
-					}
-				}
-			}
+		if in.Spec.Template.Spec.VirtualMachine != nil {
+			SetDefaults_ResourceList(&in.Spec.Template.Spec.VirtualMachine.Resources.Limits)
+			SetDefaults_ResourceList(&in.Spec.Template.Spec.VirtualMachine.Resources.Requests)
+			SetDefaults_ResourceList(&in.Spec.Template.Spec.VirtualMachine.ResourcesAllocated)
 		}
-		SetDefaults_ResourceList(&in.Spec.Template.Spec.Overhead)
+		for i := range in.Spec.Template.Spec.WorkloadInfo {
+			a := &in.Spec.Template.Spec.WorkloadInfo[i]
+			SetDefaults_ResourceList(&a.Resources.Limits)
+			SetDefaults_ResourceList(&a.Resources.Requests)
+			SetDefaults_ResourceList(&a.ResourcesAllocated)
+		}
 	}
 }
 
@@ -873,5 +716,16 @@ func SetObjectDefaults_ServiceList(in *v1.ServiceList) {
 	for i := range in.Items {
 		a := &in.Items[i]
 		SetObjectDefaults_Service(a)
+	}
+}
+
+func SetObjectDefaults_Tenant(in *v1.Tenant) {
+	SetDefaults_TenantStatus(&in.Status)
+}
+
+func SetObjectDefaults_TenantList(in *v1.TenantList) {
+	for i := range in.Items {
+		a := &in.Items[i]
+		SetObjectDefaults_Tenant(a)
 	}
 }

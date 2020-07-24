@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,23 +30,43 @@ type FakeAppsV1 struct {
 }
 
 func (c *FakeAppsV1) ControllerRevisions(namespace string) v1.ControllerRevisionInterface {
-	return &FakeControllerRevisions{c, namespace}
+	return &FakeControllerRevisions{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1) ControllerRevisionsWithMultiTenancy(namespace string, tenant string) v1.ControllerRevisionInterface {
+	return &FakeControllerRevisions{c, namespace, tenant}
 }
 
 func (c *FakeAppsV1) DaemonSets(namespace string) v1.DaemonSetInterface {
-	return &FakeDaemonSets{c, namespace}
+	return &FakeDaemonSets{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1) DaemonSetsWithMultiTenancy(namespace string, tenant string) v1.DaemonSetInterface {
+	return &FakeDaemonSets{c, namespace, tenant}
 }
 
 func (c *FakeAppsV1) Deployments(namespace string) v1.DeploymentInterface {
-	return &FakeDeployments{c, namespace}
+	return &FakeDeployments{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1) DeploymentsWithMultiTenancy(namespace string, tenant string) v1.DeploymentInterface {
+	return &FakeDeployments{c, namespace, tenant}
 }
 
 func (c *FakeAppsV1) ReplicaSets(namespace string) v1.ReplicaSetInterface {
-	return &FakeReplicaSets{c, namespace}
+	return &FakeReplicaSets{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1) ReplicaSetsWithMultiTenancy(namespace string, tenant string) v1.ReplicaSetInterface {
+	return &FakeReplicaSets{c, namespace, tenant}
 }
 
 func (c *FakeAppsV1) StatefulSets(namespace string) v1.StatefulSetInterface {
-	return &FakeStatefulSets{c, namespace}
+	return &FakeStatefulSets{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1) StatefulSetsWithMultiTenancy(namespace string, tenant string) v1.StatefulSetInterface {
+	return &FakeStatefulSets{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -53,4 +74,11 @@ func (c *FakeAppsV1) StatefulSets(namespace string) v1.StatefulSetInterface {
 func (c *FakeAppsV1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeAppsV1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

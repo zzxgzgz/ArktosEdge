@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -95,6 +96,7 @@ type RuntimeService interface {
 	ContainerManager
 	PodSandboxManager
 	ContainerStatsManager
+	VmManager
 
 	// UpdateRuntimeConfig updates runtime configuration if specified
 	UpdateRuntimeConfig(runtimeConfig *runtimeapi.RuntimeConfig) error
@@ -116,4 +118,29 @@ type ImageManagerService interface {
 	RemoveImage(image *runtimeapi.ImageSpec) error
 	// ImageFsInfo returns information of the filesystem that is used to store images.
 	ImageFsInfo() ([]*runtimeapi.FilesystemUsage, error)
+}
+
+// VM related interface methods
+type VmManager interface {
+	// Reboot VM, this will relay to virDomainReboot in libvirt
+	RebootVM(vmID string) error
+
+	// CreateSnapshot creates a snapshot of the current VM domain
+	CreateSnapshot(vmID string, snapshotID string, flag int64) error
+
+	// RestoreToSnapshot restores the current VM domain to the given snapshot
+	RestoreToSnapshot(vmID string, snapshotID string, flag int64) error
+
+	VmDeviceManagerService
+}
+
+// VM related device management methods, Nic, Volumes, etc.
+type VmDeviceManagerService interface {
+	// Attach new NIC to the VM in the POD
+	AttachNetworkInterface(string, string, *runtimeapi.NicSpec) error
+	// Detach NIC from the VM in the POD
+	DetachNetworkInterface(string, string, *runtimeapi.NicSpec) error
+	// List all or one NICs attached to the VM in the POD
+	// TODO: consider add interface status as part of the return
+	ListNetworkInterfaces(string, string) ([]*runtimeapi.NicSpec, error)
 }

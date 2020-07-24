@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakePodPresets struct {
 	Fake *FakeSettingsV1alpha1
 	ns   string
+	te   string
 }
 
 var podpresetsResource = schema.GroupVersionResource{Group: "settings.k8s.io", Version: "v1alpha1", Resource: "podpresets"}
@@ -41,18 +43,19 @@ var podpresetsKind = schema.GroupVersionKind{Group: "settings.k8s.io", Version: 
 // Get takes name of the podPreset, and returns the corresponding podPreset object, and an error if there is any.
 func (c *FakePodPresets) Get(name string, options v1.GetOptions) (result *v1alpha1.PodPreset, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(podpresetsResource, c.ns, name), &v1alpha1.PodPreset{})
+		Invokes(testing.NewGetActionWithMultiTenancy(podpresetsResource, c.ns, name, c.te), &v1alpha1.PodPreset{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1alpha1.PodPreset), err
 }
 
 // List takes label and field selectors, and returns the list of PodPresets that match those selectors.
 func (c *FakePodPresets) List(opts v1.ListOptions) (result *v1alpha1.PodPresetList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(podpresetsResource, podpresetsKind, c.ns, opts), &v1alpha1.PodPresetList{})
+		Invokes(testing.NewListActionWithMultiTenancy(podpresetsResource, podpresetsKind, c.ns, opts, c.te), &v1alpha1.PodPresetList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,46 +74,51 @@ func (c *FakePodPresets) List(opts v1.ListOptions) (result *v1alpha1.PodPresetLi
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested podPresets.
-func (c *FakePodPresets) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(podpresetsResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested podPresets.
+func (c *FakePodPresets) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(podpresetsResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a podPreset and creates it.  Returns the server's representation of the podPreset, and an error, if there is any.
 func (c *FakePodPresets) Create(podPreset *v1alpha1.PodPreset) (result *v1alpha1.PodPreset, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(podpresetsResource, c.ns, podPreset), &v1alpha1.PodPreset{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(podpresetsResource, c.ns, podPreset, c.te), &v1alpha1.PodPreset{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1alpha1.PodPreset), err
 }
 
 // Update takes the representation of a podPreset and updates it. Returns the server's representation of the podPreset, and an error, if there is any.
 func (c *FakePodPresets) Update(podPreset *v1alpha1.PodPreset) (result *v1alpha1.PodPreset, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(podpresetsResource, c.ns, podPreset), &v1alpha1.PodPreset{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(podpresetsResource, c.ns, podPreset, c.te), &v1alpha1.PodPreset{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1alpha1.PodPreset), err
 }
 
 // Delete takes name of the podPreset and deletes it. Returns an error if one occurs.
 func (c *FakePodPresets) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(podpresetsResource, c.ns, name), &v1alpha1.PodPreset{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(podpresetsResource, c.ns, name, c.te), &v1alpha1.PodPreset{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakePodPresets) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(podpresetsResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(podpresetsResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &v1alpha1.PodPresetList{})
 	return err
@@ -119,10 +127,11 @@ func (c *FakePodPresets) DeleteCollection(options *v1.DeleteOptions, listOptions
 // Patch applies the patch and returns the patched podPreset.
 func (c *FakePodPresets) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.PodPreset, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(podpresetsResource, c.ns, name, pt, data, subresources...), &v1alpha1.PodPreset{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(podpresetsResource, c.te, c.ns, name, pt, data, subresources...), &v1alpha1.PodPreset{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1alpha1.PodPreset), err
 }

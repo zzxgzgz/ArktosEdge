@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -230,6 +231,18 @@ func (u *Unstructured) SetKind(kind string) {
 	u.setNestedField(kind, "kind")
 }
 
+func (u *Unstructured) GetTenant() string {
+	return getNestedString(u.Object, "metadata", "tenant")
+}
+
+func (u *Unstructured) SetTenant(tenant string) {
+	if len(tenant) == 0 {
+		RemoveNestedField(u.Object, "metadata", "tenant")
+		return
+	}
+	u.setNestedField(tenant, "metadata", "tenant")
+}
+
 func (u *Unstructured) GetNamespace() string {
 	return getNestedString(u.Object, "metadata", "namespace")
 }
@@ -276,6 +289,22 @@ func (u *Unstructured) SetUID(uid types.UID) {
 		return
 	}
 	u.setNestedField(string(uid), "metadata", "uid")
+}
+
+func (u *Unstructured) GetHashKey() int64 {
+	val, found, err := NestedInt64(u.Object, "metadata", "hashKey")
+	if !found || err != nil {
+		return -1
+	}
+	return val
+}
+
+func (u *Unstructured) SetHashKey(hashKey int64) {
+	if hashKey == -1 {
+		RemoveNestedField(u.Object, "metadata", "hashKey")
+		return
+	}
+	u.setNestedField(hashKey, "metadata", "hashKey")
 }
 
 func (u *Unstructured) GetResourceVersion() string {
@@ -429,6 +458,31 @@ func (u *Unstructured) GroupVersionKind() schema.GroupVersionKind {
 	}
 	gvk := gv.WithKind(u.GetKind())
 	return gvk
+}
+
+func (u *Unstructured) GetInitializers() *metav1.Initializers {
+	m, found, err := nestedMapNoCopy(u.Object, "metadata", "initializers")
+	if !found || err != nil {
+		return nil
+	}
+	out := &metav1.Initializers{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(m, out); err != nil {
+		utilruntime.HandleError(fmt.Errorf("unable to retrieve initializers for object: %v", err))
+		return nil
+	}
+	return out
+}
+
+func (u *Unstructured) SetInitializers(initializers *metav1.Initializers) {
+	if initializers == nil {
+		RemoveNestedField(u.Object, "metadata", "initializers")
+		return
+	}
+	out, err := runtime.DefaultUnstructuredConverter.ToUnstructured(initializers)
+	if err != nil {
+		utilruntime.HandleError(fmt.Errorf("unable to retrieve initializers for object: %v", err))
+	}
+	u.setNestedField(out, "metadata", "initializers")
 }
 
 func (u *Unstructured) GetFinalizers() []string {

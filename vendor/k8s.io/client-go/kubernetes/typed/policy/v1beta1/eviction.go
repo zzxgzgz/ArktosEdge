@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import (
 // A group's client should implement this interface.
 type EvictionsGetter interface {
 	Evictions(namespace string) EvictionInterface
+	EvictionsWithMultiTenancy(namespace string, tenant string) EvictionInterface
 }
 
 // EvictionInterface has methods to work with Eviction resources.
@@ -35,14 +37,22 @@ type EvictionInterface interface {
 
 // evictions implements EvictionInterface
 type evictions struct {
-	client rest.Interface
-	ns     string
+	client  rest.Interface
+	clients []rest.Interface
+	ns      string
+	te      string
 }
 
 // newEvictions returns a Evictions
 func newEvictions(c *PolicyV1beta1Client, namespace string) *evictions {
+	return newEvictionsWithMultiTenancy(c, namespace, "system")
+}
+
+func newEvictionsWithMultiTenancy(c *PolicyV1beta1Client, namespace string, tenant string) *evictions {
 	return &evictions{
-		client: c.RESTClient(),
-		ns:     namespace,
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		ns:      namespace,
+		te:      tenant,
 	}
 }

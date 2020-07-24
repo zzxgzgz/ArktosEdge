@@ -63,25 +63,26 @@ func (c *Clientset) Discovery() discovery.DiscoveryInterface {
 // If config's RateLimiter is not set and QPS and Burst are acceptable,
 // NewForConfig will generate a rate-limiter in configShallowCopy.
 func NewForConfig(c *rest.Config) (*Clientset, error) {
-	configShallowCopy := *c
-	if configShallowCopy.RateLimiter == nil && configShallowCopy.QPS > 0 {
-		if configShallowCopy.Burst <= 0 {
+	configShallowCopy := c
+	kubeConfigOfConfigShallowCopy := c.GetConfig()
+	if kubeConfigOfConfigShallowCopy.RateLimiter == nil && kubeConfigOfConfigShallowCopy.QPS > 0 {
+		if kubeConfigOfConfigShallowCopy.Burst <= 0 {
 			return nil, fmt.Errorf("Burst is required to be greater than 0 when RateLimiter is not set and QPS is set to greater than 0")
 		}
-		configShallowCopy.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(configShallowCopy.QPS, configShallowCopy.Burst)
+		kubeConfigOfConfigShallowCopy.RateLimiter = flowcontrol.NewTokenBucketRateLimiter(kubeConfigOfConfigShallowCopy.QPS, kubeConfigOfConfigShallowCopy.Burst)
 	}
 	var cs Clientset
 	var err error
-	cs.devicesV1alpha1, err = devicesv1alpha1.NewForConfig(&configShallowCopy)
+	cs.devicesV1alpha1, err = devicesv1alpha1.NewForConfig(configShallowCopy)
 	if err != nil {
 		return nil, err
 	}
-	cs.reliablesyncsV1alpha1, err = reliablesyncsv1alpha1.NewForConfig(&configShallowCopy)
+	cs.reliablesyncsV1alpha1, err = reliablesyncsv1alpha1.NewForConfig(configShallowCopy)
 	if err != nil {
 		return nil, err
 	}
 
-	cs.DiscoveryClient, err = discovery.NewDiscoveryClientForConfig(&configShallowCopy)
+	cs.DiscoveryClient, err = discovery.NewDiscoveryClientForConfig(configShallowCopy)
 	if err != nil {
 		return nil, err
 	}

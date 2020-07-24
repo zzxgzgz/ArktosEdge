@@ -22,7 +22,7 @@ import (
 	"os"
 	"syscall"
 
-	"k8s.io/utils/mount"
+	"k8s.io/kubernetes/pkg/util/mount"
 )
 
 // RemoveAllOneFilesystem removes path and any children it contains.

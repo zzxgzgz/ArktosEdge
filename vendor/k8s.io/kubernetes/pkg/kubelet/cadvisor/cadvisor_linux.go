@@ -1,4 +1,4 @@
-// +build linux
+// +build cgo,linux
 
 /*
 Copyright 2015 The Kubernetes Authors.
@@ -82,7 +82,6 @@ func init() {
 	}
 }
 
-// New creates a new cAdvisor Interface for linux systems.
 func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupRoots []string, usingLegacyStats bool) (Interface, error) {
 	sysFs := sysfs.NewRealSysFs()
 
@@ -94,13 +93,12 @@ func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupRoots [
 		cadvisormetrics.NetworkUsageMetrics:     struct{}{},
 		cadvisormetrics.AcceleratorUsageMetrics: struct{}{},
 		cadvisormetrics.AppMetrics:              struct{}{},
-		cadvisormetrics.ProcessMetrics:          struct{}{},
 	}
 	if usingLegacyStats {
 		includedMetrics[cadvisormetrics.DiskUsageMetrics] = struct{}{}
 	}
 
-	// Create the cAdvisor container manager.
+	// Create and start the cAdvisor container manager.
 	m, err := manager.New(memory.New(statsCacheDuration, nil), sysFs, maxHousekeepingInterval, allowDynamicHousekeeping, includedMetrics, http.DefaultClient, cgroupRoots)
 	if err != nil {
 		return nil, err
@@ -116,11 +114,13 @@ func New(imageFsInfoProvider ImageFsInfoProvider, rootPath string, cgroupRoots [
 		}
 	}
 
-	return &cadvisorClient{
+	cadvisorClient := &cadvisorClient{
 		imageFsInfoProvider: imageFsInfoProvider,
 		rootPath:            rootPath,
 		Manager:             m,
-	}, nil
+	}
+
+	return cadvisorClient, nil
 }
 
 func (cc *cadvisorClient) Start() error {

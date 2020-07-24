@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,11 +19,11 @@ package stats
 
 import (
 	"fmt"
+	"k8s.io/kubernetes/pkg/kubelet/runtimeregistry"
 
 	cadvisorapiv1 "github.com/google/cadvisor/info/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	internalapi "k8s.io/cri-api/pkg/apis"
 	statsapi "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
@@ -39,13 +40,12 @@ func NewCRIStatsProvider(
 	resourceAnalyzer stats.ResourceAnalyzer,
 	podManager kubepod.Manager,
 	runtimeCache kubecontainer.RuntimeCache,
-	runtimeService internalapi.RuntimeService,
-	imageService internalapi.ImageManagerService,
+	runtimeManager runtimeregistry.Interface,
 	logMetricsService LogMetricsService,
 	osInterface kubecontainer.OSInterface,
 ) *StatsProvider {
 	return newStatsProvider(cadvisor, podManager, runtimeCache, newCRIStatsProvider(cadvisor, resourceAnalyzer,
-		runtimeService, imageService, logMetricsService, osInterface))
+		runtimeManager, logMetricsService, osInterface))
 }
 
 // NewCadvisorStatsProvider returns a containerStatsProvider that provides both
@@ -88,6 +88,8 @@ type StatsProvider struct {
 
 // containerStatsProvider is an interface that provides the stats of the
 // containers managed by pods.
+// TODO: support multiple runtime/image services
+// Arktos issue 350
 type containerStatsProvider interface {
 	ListPodStats() ([]statsapi.PodStats, error)
 	ListPodStatsAndUpdateCPUNanoCoreUsage() ([]statsapi.PodStats, error)
@@ -209,5 +211,9 @@ func (p *StatsProvider) HasDedicatedImageFs() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return device != rootFsInfo.Device, nil
+	if device != rootFsInfo.Device {
+		return true, nil
+	}
+
+	return false, nil
 }

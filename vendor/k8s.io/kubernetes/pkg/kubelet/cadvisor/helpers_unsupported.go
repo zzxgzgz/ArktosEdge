@@ -1,4 +1,4 @@
-// +build !linux
+// +build !linux linux,!cgo
 
 /*
 Copyright 2017 The Kubernetes Authors.

@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +26,8 @@ import (
 	"sync"
 	"time"
 
+	"math/rand"
+
 	"github.com/golang/protobuf/proto"
 	openapi_v2 "github.com/googleapis/gnostic/OpenAPIv2"
 
@@ -35,6 +38,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/version"
+	apifilters "k8s.io/apiserver/pkg/endpoints/filters"
 	"k8s.io/client-go/kubernetes/scheme"
 	restclient "k8s.io/client-go/rest"
 )
@@ -51,8 +55,10 @@ const (
 
 // DiscoveryInterface holds the methods that discover server-supported API groups,
 // versions and resources.
+// Keep only one rest client for discovery for now
 type DiscoveryInterface interface {
 	RESTClient() restclient.Interface
+	RESTClients() []restclient.Interface
 	ServerGroupsInterface
 	ServerResourcesInterface
 	ServerVersionInterface
@@ -128,7 +134,7 @@ type OpenAPISchemaInterface interface {
 // DiscoveryClient implements the functions that discover server-supported API groups,
 // versions and resources.
 type DiscoveryClient struct {
-	restClient restclient.Interface
+	restClients []restclient.Interface
 
 	LegacyPrefix string
 }
@@ -155,7 +161,7 @@ func apiVersionsToAPIGroup(apiVersions *metav1.APIVersions) (apiGroup metav1.API
 func (d *DiscoveryClient) ServerGroups() (apiGroupList *metav1.APIGroupList, err error) {
 	// Get the groupVersions exposed at /api
 	v := &metav1.APIVersions{}
-	err = d.restClient.Get().AbsPath(d.LegacyPrefix).Do().Into(v)
+	err = d.RESTClient().Get().AbsPath(d.LegacyPrefix).Do().Into(v)
 	apiGroup := metav1.APIGroup{}
 	if err == nil && len(v.Versions) != 0 {
 		apiGroup = apiVersionsToAPIGroup(v)
@@ -166,7 +172,7 @@ func (d *DiscoveryClient) ServerGroups() (apiGroupList *metav1.APIGroupList, err
 
 	// Get the groupVersions exposed at /apis
 	apiGroupList = &metav1.APIGroupList{}
-	err = d.restClient.Get().AbsPath("/apis").Do().Into(apiGroupList)
+	err = d.RESTClient().Get().AbsPath("/apis").Do().Into(apiGroupList)
 	if err != nil && !errors.IsNotFound(err) && !errors.IsForbidden(err) {
 		return nil, err
 	}
@@ -183,8 +189,15 @@ func (d *DiscoveryClient) ServerGroups() (apiGroupList *metav1.APIGroupList, err
 }
 
 // ServerResourcesForGroupVersion returns the supported resources for a group and version.
-func (d *DiscoveryClient) ServerResourcesForGroupVersion(groupVersion string) (resources *metav1.APIResourceList, err error) {
+func (d *DiscoveryClient) ServerResourcesForGroupVersion(tenantGroupVersion string) (resources *metav1.APIResourceList, err error) {
 	url := url.URL{}
+
+	parts := strings.SplitN(tenantGroupVersion, ":", 2)
+	tenantedFormat := false
+	if len(parts) > 1 && len(parts[0]) > 0 {
+		tenantedFormat = true
+	}
+	groupVersion := parts[len(parts)-1]
 	if len(groupVersion) == 0 {
 		return nil, fmt.Errorf("groupVersion shouldn't be empty")
 	}
@@ -196,7 +209,13 @@ func (d *DiscoveryClient) ServerResourcesForGroupVersion(groupVersion string) (r
 	resources = &metav1.APIResourceList{
 		GroupVersion: groupVersion,
 	}
-	err = d.restClient.Get().AbsPath(url.String()).Do().Into(resources)
+
+	if !tenantedFormat {
+		err = d.RESTClient().Get().AbsPath(url.String()).Do().Into(resources)
+	} else {
+		err = d.RESTClient().Get().AbsPath(url.String()).Param(apifilters.TenantParam, parts[0]).Do().Into(resources)
+	}
+
 	if err != nil {
 		// ignore 403 or 404 error to be compatible with an v1.0 server.
 		if groupVersion == "v1" && (errors.IsNotFound(err) || errors.IsForbidden(err)) {
@@ -405,7 +424,7 @@ func ServerPreferredNamespacedResources(d DiscoveryInterface) ([]*metav1.APIReso
 
 // ServerVersion retrieves and parses the server's version (git version).
 func (d *DiscoveryClient) ServerVersion() (*version.Info, error) {
-	body, err := d.restClient.Get().AbsPath("/version").Do().Raw()
+	body, err := d.RESTClient().Get().AbsPath("/version").Do().Raw()
 	if err != nil {
 		return nil, err
 	}
@@ -419,12 +438,12 @@ func (d *DiscoveryClient) ServerVersion() (*version.Info, error) {
 
 // OpenAPISchema fetches the open api schema using a rest client and parses the proto.
 func (d *DiscoveryClient) OpenAPISchema() (*openapi_v2.Document, error) {
-	data, err := d.restClient.Get().AbsPath("/openapi/v2").SetHeader("Accept", mimePb).Do().Raw()
+	data, err := d.RESTClient().Get().AbsPath("/openapi/v2").SetHeader("Accept", mimePb).Do().Raw()
 	if err != nil {
 		if errors.IsForbidden(err) || errors.IsNotFound(err) || errors.IsNotAcceptable(err) {
 			// single endpoint not found/registered in old server, try to fetch old endpoint
 			// TODO: remove this when kubectl/client-go don't work with 1.9 server
-			data, err = d.restClient.Get().AbsPath("/swagger-2.0.0.pb-v1").Do().Raw()
+			data, err = d.RESTClient().Get().AbsPath("/swagger-2.0.0.pb-v1").Do().Raw()
 			if err != nil {
 				return nil, err
 			}
@@ -457,23 +476,18 @@ func withRetries(maxRetries int, f func() ([]*metav1.APIGroup, []*metav1.APIReso
 	return resultGroups, result, err
 }
 
-func setDiscoveryDefaults(config *restclient.Config) error {
-	config.APIPath = ""
-	config.GroupVersion = nil
-	if config.Timeout == 0 {
-		config.Timeout = defaultTimeout
-	}
-	if config.Burst == 0 && config.QPS < 100 {
-		// discovery is expected to be bursty, increase the default burst
-		// to accommodate looking up resource info for many API groups.
-		// matches burst set by ConfigFlags#ToDiscoveryClient().
-		// see https://issue.k8s.io/86149
-		config.Burst = 100
-	}
-	codec := runtime.NoopEncoder{Decoder: scheme.Codecs.UniversalDecoder()}
-	config.NegotiatedSerializer = serializer.NegotiatedSerializerWrapper(runtime.SerializerInfo{Serializer: codec})
-	if len(config.UserAgent) == 0 {
-		config.UserAgent = restclient.DefaultKubernetesUserAgent()
+func setDiscoveryDefaults(configs *restclient.Config) error {
+	for _, config := range configs.GetAllConfigs() {
+		config.APIPath = ""
+		config.GroupVersion = nil
+		if config.Timeout == 0 {
+			config.Timeout = defaultTimeout
+		}
+		codec := runtime.NoopEncoder{Decoder: scheme.Codecs.UniversalDecoder()}
+		config.NegotiatedSerializer = serializer.NegotiatedSerializerWrapper(runtime.SerializerInfo{Serializer: codec})
+		if len(config.UserAgent) == 0 {
+			config.UserAgent = restclient.DefaultKubernetesUserAgent()
+		}
 	}
 	return nil
 }
@@ -481,12 +495,21 @@ func setDiscoveryDefaults(config *restclient.Config) error {
 // NewDiscoveryClientForConfig creates a new DiscoveryClient for the given config. This client
 // can be used to discover supported resources in the API server.
 func NewDiscoveryClientForConfig(c *restclient.Config) (*DiscoveryClient, error) {
-	config := *c
-	if err := setDiscoveryDefaults(&config); err != nil {
+	configs := restclient.CopyConfigs(c)
+	if err := setDiscoveryDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := restclient.UnversionedRESTClientFor(&config)
-	return &DiscoveryClient{restClient: client, LegacyPrefix: "/api"}, err
+
+	clients := make([]restclient.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := restclient.UnversionedRESTClientFor(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
+	}
+
+	return &DiscoveryClient{restClients: clients, LegacyPrefix: "/api"}, nil
 }
 
 // NewDiscoveryClientForConfigOrDie creates a new DiscoveryClient for the given config. If
@@ -502,7 +525,7 @@ func NewDiscoveryClientForConfigOrDie(c *restclient.Config) *DiscoveryClient {
 
 // NewDiscoveryClient returns  a new DiscoveryClient for the given RESTClient.
 func NewDiscoveryClient(c restclient.Interface) *DiscoveryClient {
-	return &DiscoveryClient{restClient: c, LegacyPrefix: "/api"}
+	return &DiscoveryClient{restClients: []restclient.Interface{c}, LegacyPrefix: "/api"}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -511,5 +534,25 @@ func (d *DiscoveryClient) RESTClient() restclient.Interface {
 	if d == nil {
 		return nil
 	}
-	return d.restClient
+	max := len(d.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return d.restClients[0]
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	ran := rand.Intn(max)
+	return d.restClients[ran]
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (d *DiscoveryClient) RESTClients() []restclient.Interface {
+	if d == nil {
+		return nil
+	}
+
+	return d.restClients
 }

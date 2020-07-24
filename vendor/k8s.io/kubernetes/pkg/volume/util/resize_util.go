@@ -1,5 +1,6 @@
 /*
 Copyright 2018 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,8 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"k8s.io/utils/mount"
-
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -30,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/util/resizefs"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
@@ -76,7 +76,7 @@ func UpdatePVSize(
 		return fmt.Errorf("error Creating two way merge patch for PV %q with error : %v", pvClone.Name, err)
 	}
 
-	_, err = kubeClient.CoreV1().PersistentVolumes().Patch(pvClone.Name, types.StrategicMergePatchType, patchBytes)
+	_, err = kubeClient.CoreV1().PersistentVolumesWithMultiTenancy(pvClone.Tenant).Patch(pvClone.Name, types.StrategicMergePatchType, patchBytes)
 	if err != nil {
 		return fmt.Errorf("error Patching PV %q with error : %v", pvClone.Name, err)
 	}
@@ -170,7 +170,7 @@ func PatchPVCStatus(
 		return nil, fmt.Errorf("patchPVCStatus failed to patch PVC %q: %v", oldPVC.Name, err)
 	}
 
-	updatedClaim, updateErr := kubeClient.CoreV1().PersistentVolumeClaims(oldPVC.Namespace).
+	updatedClaim, updateErr := kubeClient.CoreV1().PersistentVolumeClaimsWithMultiTenancy(oldPVC.Namespace, oldPVC.Tenant).
 		Patch(oldPVC.Name, types.StrategicMergePatchType, patchBytes, "status")
 	if updateErr != nil {
 		return nil, fmt.Errorf("patchPVCStatus failed to patch PVC %q: %v", oldPVC.Name, updateErr)

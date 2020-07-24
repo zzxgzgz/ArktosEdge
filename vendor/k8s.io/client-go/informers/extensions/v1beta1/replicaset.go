@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -42,6 +43,7 @@ type replicaSetInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
 	namespace        string
+	tenant           string
 }
 
 // NewReplicaSetInformer constructs a new informer for ReplicaSet type.
@@ -51,23 +53,31 @@ func NewReplicaSetInformer(client kubernetes.Interface, namespace string, resync
 	return NewFilteredReplicaSetInformer(client, namespace, resyncPeriod, indexers, nil)
 }
 
+func NewReplicaSetInformerWithMultiTenancy(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tenant string) cache.SharedIndexInformer {
+	return NewFilteredReplicaSetInformerWithMultiTenancy(client, namespace, resyncPeriod, indexers, nil, tenant)
+}
+
 // NewFilteredReplicaSetInformer constructs a new informer for ReplicaSet type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
 func NewFilteredReplicaSetInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
+	return NewFilteredReplicaSetInformerWithMultiTenancy(client, namespace, resyncPeriod, indexers, tweakListOptions, "system")
+}
+
+func NewFilteredReplicaSetInformerWithMultiTenancy(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc, tenant string) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ExtensionsV1beta1().ReplicaSets(namespace).List(options)
+				return client.ExtensionsV1beta1().ReplicaSetsWithMultiTenancy(namespace, tenant).List(options)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options v1.ListOptions) watch.AggregatedWatchInterface {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.ExtensionsV1beta1().ReplicaSets(namespace).Watch(options)
+				return client.ExtensionsV1beta1().ReplicaSetsWithMultiTenancy(namespace, tenant).Watch(options)
 			},
 		},
 		&extensionsv1beta1.ReplicaSet{},
@@ -77,7 +87,7 @@ func NewFilteredReplicaSetInformer(client kubernetes.Interface, namespace string
 }
 
 func (f *replicaSetInformer) defaultInformer(client kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredReplicaSetInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewFilteredReplicaSetInformerWithMultiTenancy(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions, f.tenant)
 }
 
 func (f *replicaSetInformer) Informer() cache.SharedIndexInformer {

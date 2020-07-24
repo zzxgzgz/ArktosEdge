@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type CronJobLister interface {
 	List(selector labels.Selector) (ret []*v1beta1.CronJob, err error)
 	// CronJobs returns an object that can list and get CronJobs.
 	CronJobs(namespace string) CronJobNamespaceLister
+	CronJobsWithMultiTenancy(namespace string, tenant string) CronJobNamespaceLister
 	CronJobListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *cronJobLister) List(selector labels.Selector) (ret []*v1beta1.CronJob, 
 
 // CronJobs returns an object that can list and get CronJobs.
 func (s *cronJobLister) CronJobs(namespace string) CronJobNamespaceLister {
-	return cronJobNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return cronJobNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *cronJobLister) CronJobsWithMultiTenancy(namespace string, tenant string) CronJobNamespaceLister {
+	return cronJobNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // CronJobNamespaceLister helps list and get CronJobs.
 type CronJobNamespaceLister interface {
-	// List lists all CronJobs in the indexer for a given namespace.
+	// List lists all CronJobs in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1beta1.CronJob, err error)
-	// Get retrieves the CronJob from the indexer for a given namespace and name.
+	// Get retrieves the CronJob from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1beta1.CronJob, error)
 	CronJobNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type CronJobNamespaceLister interface {
 type cronJobNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all CronJobs in the indexer for a given namespace.
 func (s cronJobNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.CronJob, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1beta1.CronJob))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s cronJobNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.C
 
 // Get retrieves the CronJob from the indexer for a given namespace and name.
 func (s cronJobNamespaceLister) Get(name string) (*v1beta1.CronJob, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

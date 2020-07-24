@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -41,7 +42,7 @@ type CustomResourceDefinitionSpec struct {
 	Version string
 	// Names are the names used to describe this custom resource
 	Names CustomResourceDefinitionNames
-	// Scope indicates whether this resource is cluster or namespace scoped.  Default is namespaced
+	// Scope indicates whether this resource is cluster, tenant or namespace scoped.  Default is namespaced
 	Scope ResourceScope
 	// Validation describes the validation methods for CustomResources
 	// Optional, the global validation schema for all versions.
@@ -245,6 +246,7 @@ type ResourceScope string
 
 const (
 	ClusterScoped   ResourceScope = "Cluster"
+	TenantScoped    ResourceScope = "Tenant"
 	NamespaceScoped ResourceScope = "Namespaced"
 )
 
@@ -289,11 +291,6 @@ const (
 	NonStructuralSchema CustomResourceDefinitionConditionType = "NonStructuralSchema"
 	// Terminating means that the CustomResourceDefinition has been deleted and is cleaning up.
 	Terminating CustomResourceDefinitionConditionType = "Terminating"
-	// KubernetesAPIApprovalPolicyConformant indicates that an API in *.k8s.io or *.kubernetes.io is or is not approved.  For CRDs
-	// outside those groups, this condition will not be set.  For CRDs inside those groups, the condition will
-	// be true if .metadata.annotations["api-approved.kubernetes.io"] is set to a URL, otherwise it will be false.
-	// See https://github.com/kubernetes/enhancements/pull/1111 for more details.
-	KubernetesAPIApprovalPolicyConformant CustomResourceDefinitionConditionType = "KubernetesAPIApprovalPolicyConformant"
 )
 
 // CustomResourceDefinitionCondition contains details for the current condition of this pod.

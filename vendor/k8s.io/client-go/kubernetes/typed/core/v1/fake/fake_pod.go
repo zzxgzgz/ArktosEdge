@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakePods struct {
 	Fake *FakeCoreV1
 	ns   string
+	te   string
 }
 
 var podsResource = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
@@ -41,18 +43,19 @@ var podsKind = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Pod"}
 // Get takes name of the pod, and returns the corresponding pod object, and an error if there is any.
 func (c *FakePods) Get(name string, options v1.GetOptions) (result *corev1.Pod, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(podsResource, c.ns, name), &corev1.Pod{})
+		Invokes(testing.NewGetActionWithMultiTenancy(podsResource, c.ns, name, c.te), &corev1.Pod{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Pod), err
 }
 
 // List takes label and field selectors, and returns the list of Pods that match those selectors.
 func (c *FakePods) List(opts v1.ListOptions) (result *corev1.PodList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(podsResource, podsKind, c.ns, opts), &corev1.PodList{})
+		Invokes(testing.NewListActionWithMultiTenancy(podsResource, podsKind, c.ns, opts, c.te), &corev1.PodList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,32 +74,37 @@ func (c *FakePods) List(opts v1.ListOptions) (result *corev1.PodList, err error)
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested pods.
-func (c *FakePods) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(podsResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested pods.
+func (c *FakePods) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(podsResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a pod and creates it.  Returns the server's representation of the pod, and an error, if there is any.
 func (c *FakePods) Create(pod *corev1.Pod) (result *corev1.Pod, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(podsResource, c.ns, pod), &corev1.Pod{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(podsResource, c.ns, pod, c.te), &corev1.Pod{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Pod), err
 }
 
 // Update takes the representation of a pod and updates it. Returns the server's representation of the pod, and an error, if there is any.
 func (c *FakePods) Update(pod *corev1.Pod) (result *corev1.Pod, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(podsResource, c.ns, pod), &corev1.Pod{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(podsResource, c.ns, pod, c.te), &corev1.Pod{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Pod), err
 }
 
@@ -104,7 +112,7 @@ func (c *FakePods) Update(pod *corev1.Pod) (result *corev1.Pod, err error) {
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 func (c *FakePods) UpdateStatus(pod *corev1.Pod) (*corev1.Pod, error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(podsResource, "status", c.ns, pod), &corev1.Pod{})
+		Invokes(testing.NewUpdateSubresourceActionWithMultiTenancy(podsResource, "status", c.ns, pod, c.te), &corev1.Pod{})
 
 	if obj == nil {
 		return nil, err
@@ -115,14 +123,14 @@ func (c *FakePods) UpdateStatus(pod *corev1.Pod) (*corev1.Pod, error) {
 // Delete takes name of the pod and deletes it. Returns an error if one occurs.
 func (c *FakePods) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(podsResource, c.ns, name), &corev1.Pod{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(podsResource, c.ns, name, c.te), &corev1.Pod{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakePods) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(podsResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(podsResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &corev1.PodList{})
 	return err
@@ -131,32 +139,11 @@ func (c *FakePods) DeleteCollection(options *v1.DeleteOptions, listOptions v1.Li
 // Patch applies the patch and returns the patched pod.
 func (c *FakePods) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *corev1.Pod, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(podsResource, c.ns, name, pt, data, subresources...), &corev1.Pod{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(podsResource, c.te, c.ns, name, pt, data, subresources...), &corev1.Pod{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Pod), err
-}
-
-// GetEphemeralContainers takes name of the pod, and returns the corresponding ephemeralContainers object, and an error if there is any.
-func (c *FakePods) GetEphemeralContainers(podName string, options v1.GetOptions) (result *corev1.EphemeralContainers, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewGetSubresourceAction(podsResource, c.ns, "ephemeralcontainers", podName), &corev1.EphemeralContainers{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*corev1.EphemeralContainers), err
-}
-
-// UpdateEphemeralContainers takes the representation of a ephemeralContainers and updates it. Returns the server's representation of the ephemeralContainers, and an error, if there is any.
-func (c *FakePods) UpdateEphemeralContainers(podName string, ephemeralContainers *corev1.EphemeralContainers) (result *corev1.EphemeralContainers, err error) {
-	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(podsResource, "ephemeralcontainers", c.ns, ephemeralContainers), &corev1.EphemeralContainers{})
-
-	if obj == nil {
-		return nil, err
-	}
-	return obj.(*corev1.EphemeralContainers), err
 }

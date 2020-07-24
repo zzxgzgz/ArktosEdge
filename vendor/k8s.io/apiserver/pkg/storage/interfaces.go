@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,6 +20,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"go.etcd.io/etcd/clientv3"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/fields"
@@ -73,13 +75,16 @@ type ResponseMeta struct {
 	ResourceVersion uint64
 }
 
-// IndexerFunc is a function that for a given object computes
-// <value of an index> for a particular <index>.
-type IndexerFunc func(obj runtime.Object) string
+// MatchValue defines a pair (<index name>, <value for that index>).
+type MatchValue struct {
+	IndexName string
+	Value     string
+}
 
-// IndexerFuncs is a mapping from <index name> to function that
-// for a given object computes <value for that index>.
-type IndexerFuncs map[string]IndexerFunc
+// TriggerPublisherFunc is a function that takes an object, and returns a list of pairs
+// (<index name>, <index value for the given object>) for all indexes known
+// to that function.
+type TriggerPublisherFunc func(obj runtime.Object) []MatchValue
 
 // Everything accepts all objects.
 var Everything = SelectionPredicate{
@@ -90,15 +95,15 @@ var Everything = SelectionPredicate{
 // Pass an UpdateFunc to Interface.GuaranteedUpdate to make an update
 // that is guaranteed to succeed.
 // See the comment for GuaranteedUpdate for more details.
-type UpdateFunc func(input runtime.Object, res ResponseMeta) (output runtime.Object, ttl *uint64, err error)
+type UpdateFunc func(input runtime.Object, res ResponseMeta) (output runtime.Object, ttl *uint64, updatettl *uint64, err error)
 
 // ValidateObjectFunc is a function to act on a given object. An error may be returned
 // if the hook cannot be completed. The function may NOT transform the provided
 // object.
-type ValidateObjectFunc func(ctx context.Context, obj runtime.Object) error
+type ValidateObjectFunc func(obj runtime.Object) error
 
 // ValidateAllObjectFunc is a "admit everything" instance of ValidateObjectFunc.
-func ValidateAllObjectFunc(ctx context.Context, obj runtime.Object) error {
+func ValidateAllObjectFunc(obj runtime.Object) error {
 	return nil
 }
 
@@ -169,7 +174,7 @@ type Interface interface {
 	// (e.g. reconnecting without missing any updates).
 	// If resource version is "0", this interface will get current object at given key
 	// and send it in an "ADDED" event, before watch starts.
-	Watch(ctx context.Context, key string, resourceVersion string, p SelectionPredicate) (watch.Interface, error)
+	Watch(ctx context.Context, key string, resourceVersion string, p SelectionPredicate) watch.AggregatedWatchInterface
 
 	// WatchList begins watching the specified key's items. Items are decoded into API
 	// objects and any item selected by 'p' are sent down to returned watch.Interface.
@@ -178,7 +183,7 @@ type Interface interface {
 	// (e.g. reconnecting without missing any updates).
 	// If resource version is "0", this interface will list current objects directory defined by key
 	// and send them in "ADDED" events, before watch starts.
-	WatchList(ctx context.Context, key string, resourceVersion string, p SelectionPredicate) (watch.Interface, error)
+	WatchList(ctx context.Context, key string, resourceVersion string, p SelectionPredicate) watch.AggregatedWatchInterface
 
 	// Get unmarshals json found at key into objPtr. On a not found error, will either
 	// return a zero object of the requested type, or an error, depending on ignoreNotFound.
@@ -236,4 +241,26 @@ type Interface interface {
 
 	// Count returns number of different entries under the key (generally being path prefix).
 	Count(key string) (int64, error)
+}
+
+// StorageClusterInterface allows backend storage connection to be updated
+type StorageClusterInterface interface {
+	// Support original storage interface functions
+	Interface
+
+	// Add a new backend storage client for clusterId
+	AddDataClient(c *clientv3.Client, clusterId uint8, destroyFunc func()) error
+
+	// Update the new backend storage client for clusterId
+	UpdateDataClient(c *clientv3.Client, clusterId uint8, destroyFunc func()) error
+
+	// Delete backend client for clusterId
+	DeleteDataClient(clusterId uint8)
+}
+
+// Interval defines a left closed Begin bound and a right open End bound.
+// If Begin is empty, it is left unbounded.
+// If End is empty, it is right unbounded.
+type Interval struct {
+	Begin, End string
 }

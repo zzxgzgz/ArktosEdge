@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import (
 // A group's client should implement this interface.
 type TokenReviewsGetter interface {
 	TokenReviews() TokenReviewInterface
+	TokenReviewsWithMultiTenancy(tenant string) TokenReviewInterface
 }
 
 // TokenReviewInterface has methods to work with TokenReview resources.
@@ -35,12 +37,20 @@ type TokenReviewInterface interface {
 
 // tokenReviews implements TokenReviewInterface
 type tokenReviews struct {
-	client rest.Interface
+	client  rest.Interface
+	clients []rest.Interface
+	te      string
 }
 
 // newTokenReviews returns a TokenReviews
 func newTokenReviews(c *AuthenticationV1Client) *tokenReviews {
+	return newTokenReviewsWithMultiTenancy(c, "system")
+}
+
+func newTokenReviewsWithMultiTenancy(c *AuthenticationV1Client, tenant string) *tokenReviews {
 	return &tokenReviews{
-		client: c.RESTClient(),
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		te:      tenant,
 	}
 }

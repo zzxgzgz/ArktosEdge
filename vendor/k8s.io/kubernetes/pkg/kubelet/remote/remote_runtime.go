@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -28,6 +29,7 @@ import (
 
 	internalapi "k8s.io/cri-api/pkg/apis"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
+	"k8s.io/kubernetes/pkg/kubelet/types"
 	"k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/kubelet/util/logreduction"
 	utilexec "k8s.io/utils/exec"
@@ -183,6 +185,15 @@ func (r *RemoteRuntimeService) ListPodSandbox(filter *runtimeapi.PodSandboxFilte
 		return nil, err
 	}
 
+	// remote runtime may not have the tenant in the metadata set, we set it here
+	if len(resp.Items) > 0 {
+		for _, item := range resp.Items {
+			if item.Metadata.Tenant == "" {
+				item.Metadata.Tenant = types.GetPodTenant(item.Labels)
+			}
+		}
+	}
+
 	return resp.Items, nil
 }
 
@@ -282,7 +293,11 @@ func (r *RemoteRuntimeService) ListContainers(filter *runtimeapi.ContainerFilter
 }
 
 // ContainerStatus returns the container status.
+// TODO: check how virtlet, criproxy knows the containerID for cloudFabric vm type ?
+//       one solution is to add the containerID faked in the podConvert as annotation to the pod, and remove it when we move to directly calling libvirt as VM runtime
+//
 func (r *RemoteRuntimeService) ContainerStatus(containerID string) (*runtimeapi.ContainerStatus, error) {
+	klog.V(6).Infof("Get container status from remote runtime service for containerID: %s", containerID)
 	ctx, cancel := getContextWithTimeout(r.timeout)
 	defer cancel()
 
@@ -305,6 +320,7 @@ func (r *RemoteRuntimeService) ContainerStatus(containerID string) (*runtimeapi.
 		}
 	}
 
+	klog.V(6).Infof("Container status from remote runtime service: %v", resp.Status)
 	return resp.Status, nil
 }
 
@@ -509,4 +525,107 @@ func (r *RemoteRuntimeService) ReopenContainerLog(containerID string) error {
 		return err
 	}
 	return nil
+}
+
+func (r *RemoteRuntimeService) RebootVM(vmID string) error {
+	klog.V(4).Infof("Calling runtime service to reboot VM %s", vmID)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	_, err := r.runtimeClient.RebootVM(ctx, &runtimeapi.RebootVMRequest{VmId: vmID})
+
+	if err != nil {
+		klog.Errorf("RebootVM %s from runtime service failed: %v", vmID, err)
+		return err
+	}
+
+	return nil
+}
+
+func (r *RemoteRuntimeService) CreateSnapshot(vmID string, snapshotID string, flags int64) error {
+	klog.V(4).Infof("Calling runtime service to create snapshot for VM %s and snapshot %s", vmID, snapshotID)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	_, err := r.runtimeClient.CreateSnapshot(ctx, &runtimeapi.CreateSnapshotRequest{
+		VmID:       vmID,
+		SnapshotID: snapshotID,
+		Flags:      flags})
+
+	if err != nil {
+		klog.Errorf("CreateSnapshot(vm %s, snapshotID %s) from runtime service failed: %v", vmID, snapshotID, err)
+		return err
+	}
+
+	return nil
+}
+
+func (r *RemoteRuntimeService) RestoreToSnapshot(vmID string, snapshotID string, flags int64) error {
+	klog.V(4).Infof("Calling runtime service to restore VM %s to snapshot %s", vmID, snapshotID)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	_, err := r.runtimeClient.RestoreToSnapshot(ctx, &runtimeapi.RestoreToSnapshotRequest{
+		VmID:       vmID,
+		SnapshotID: snapshotID,
+		Flags:      0})
+
+	if err != nil {
+		klog.Errorf("RestoreToSnapshot(vm %s, snapshotID %s) from runtime service failed: %v", vmID, snapshotID, err)
+		return err
+	}
+
+	return nil
+}
+
+// Add new NIC to PodSandbox-VM
+// An important note, in our system:
+// 1. The VM name from k8s Podspec equals the VN -- please refer to createContainer code path
+// 2. pod ID == podSandBoxID
+func (r *RemoteRuntimeService) AttachNetworkInterface(podSandboxID string, vmName string, nic *runtimeapi.NicSpec) error {
+	klog.V(4).Infof("Calling runtime service to attach NIC %v to PodSandbox-VM %s-%s", nic, podSandboxID, vmName)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	_, err := r.runtimeClient.AttachNetworkInterface(ctx,
+		&runtimeapi.DeviceAttachDetachRequest{PodSandboxID: podSandboxID, VmName: vmName, Nic: nic})
+
+	if err != nil {
+		klog.Errorf("AttacheNetworkInterface %s-%s from runtime service failed: %v", podSandboxID, vmName, err)
+		return err
+	}
+
+	return nil
+}
+
+func (r *RemoteRuntimeService) DetachNetworkInterface(podSandboxID string, vmName string, nic *runtimeapi.NicSpec) error {
+	klog.V(4).Infof("Calling runtime service to detach NIC %v from PodSandbox-VM %s-%s", nic, podSandboxID, vmName)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	_, err := r.runtimeClient.DetachNetworkInterface(ctx,
+		&runtimeapi.DeviceAttachDetachRequest{PodSandboxID: podSandboxID, VmName: vmName, Nic: nic})
+
+	if err != nil {
+		klog.Errorf("DetacheNetworkInterface %s-%s from runtime service failed: %v", podSandboxID, vmName, err)
+		return err
+	}
+
+	return nil
+}
+
+func (r *RemoteRuntimeService) ListNetworkInterfaces(podSandboxID string, vmName string) ([]*runtimeapi.NicSpec, error) {
+	klog.V(4).Infof("Calling runtime service to list NICs attached to PodSandbox-VM %s-%s", podSandboxID, vmName)
+	ctx, cancel := getContextWithTimeout(r.timeout)
+	defer cancel()
+
+	resp, err := r.runtimeClient.ListNetworkInterfaces(ctx,
+		&runtimeapi.ListDeviceRequest{PodSandboxId: podSandboxID, VmName: vmName, NicName: ""})
+
+	if err != nil {
+		klog.Errorf("ListNetworkInterfaces on %s-%s from runtime service failed: %v", podSandboxID, vmName, err)
+		return nil, err
+	}
+
+	return resp.Nics, nil
 }

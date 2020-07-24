@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -206,11 +207,17 @@ func (g *GenericPLEG) relist() {
 		return
 	}
 
+	// Debug logging
+	klog.V(6).Infof("GenericPLEG: got %d of pods from runtime:", len(podList))
+	for _, p := range podList {
+		for _, c := range p.Containers {
+			klog.V(6).Infof("\tPod: %s, container name:%s, container ID: %s", p.Name, c.Name, c.ID.ID)
+		}
+	}
+
 	g.updateRelistTime(timestamp)
 
 	pods := kubecontainer.Pods(podList)
-	// update running pod and container count
-	updateRunningPodAndContainerMetrics(pods)
 	g.podRecords.setCurrent(pods)
 
 	// Compare the old and the current pods, and generate events.
@@ -249,13 +256,13 @@ func (g *GenericPLEG) relist() {
 			// parallelize if needed.
 			if err := g.updateCache(pod, pid); err != nil {
 				// Rely on updateCache calling GetPodStatus to log the actual error.
-				klog.V(4).Infof("PLEG: Ignoring events for pod %s/%s: %v", pod.Name, pod.Namespace, err)
+				klog.V(4).Infof("PLEG: Ignoring events for pod %s/%s/%s: %v", pod.Name, pod.Namespace, pod.Tenant, err)
 
 				// make sure we try to reinspect the pod during the next relisting
 				needsReinspection[pid] = pod
 
 				continue
-			} else {
+			} else if _, found := g.podsToReinspect[pid]; found {
 				// this pod was in the list to reinspect and we did so because it had events, so remove it
 				// from the list (we don't want the reinspection code below to inspect it a second time in
 				// this relist execution)
@@ -285,7 +292,7 @@ func (g *GenericPLEG) relist() {
 			for pid, pod := range g.podsToReinspect {
 				if err := g.updateCache(pod, pid); err != nil {
 					// Rely on updateCache calling GetPodStatus to log the actual error.
-					klog.V(5).Infof("PLEG: pod %s/%s failed reinspection: %v", pod.Name, pod.Namespace, err)
+					klog.V(5).Infof("PLEG: pod %s/%s/%s failed reinspection: %v", pod.Name, pod.Namespace, pod.Tenant, err)
 					needsReinspection[pid] = pod
 				}
 			}
@@ -346,22 +353,22 @@ func (g *GenericPLEG) cacheEnabled() bool {
 	return g.cache != nil
 }
 
-// getPodIP preserves an older cached status' pod IP if the new status has no pod IPs
+// getPodIP preserves an older cached status' pod IP if the new status has no pod IP
 // and its sandboxes have exited
-func (g *GenericPLEG) getPodIPs(pid types.UID, status *kubecontainer.PodStatus) []string {
-	if len(status.IPs) != 0 {
-		return status.IPs
+func (g *GenericPLEG) getPodIP(pid types.UID, status *kubecontainer.PodStatus) string {
+	if status.IP != "" {
+		return status.IP
 	}
 
 	oldStatus, err := g.cache.Get(pid)
-	if err != nil || len(oldStatus.IPs) == 0 {
-		return nil
+	if err != nil || oldStatus.IP == "" {
+		return ""
 	}
 
 	for _, sandboxStatus := range status.SandboxStatuses {
 		// If at least one sandbox is ready, then use this status update's pod IP
 		if sandboxStatus.State == runtimeapi.PodSandboxState_SANDBOX_READY {
-			return status.IPs
+			return status.IP
 		}
 	}
 
@@ -371,14 +378,14 @@ func (g *GenericPLEG) getPodIPs(pid types.UID, status *kubecontainer.PodStatus) 
 		// running then use the new pod IP
 		for _, containerStatus := range status.ContainerStatuses {
 			if containerStatus.State == kubecontainer.ContainerStateCreated || containerStatus.State == kubecontainer.ContainerStateRunning {
-				return status.IPs
+				return status.IP
 			}
 		}
 	}
 
 	// For pods with no ready containers or sandboxes (like exited pods)
 	// use the old status' pod IP
-	return oldStatus.IPs
+	return oldStatus.IP
 }
 
 func (g *GenericPLEG) updateCache(pod *kubecontainer.Pod, pid types.UID) error {
@@ -393,14 +400,14 @@ func (g *GenericPLEG) updateCache(pod *kubecontainer.Pod, pid types.UID) error {
 	// TODO: Consider adding a new runtime method
 	// GetPodStatus(pod *kubecontainer.Pod) so that Docker can avoid listing
 	// all containers again.
-	status, err := g.runtime.GetPodStatus(pod.ID, pod.Name, pod.Namespace)
-	klog.V(4).Infof("PLEG: Write status for %s/%s: %#v (err: %v)", pod.Name, pod.Namespace, status, err)
+	status, err := g.runtime.GetPodStatus(pod.ID, pod.Name, pod.Namespace, pod.Tenant)
+	klog.V(4).Infof("PLEG: Write status for %s/%s/%s: %#v (err: %v)", pod.Name, pod.Namespace, pod.Tenant, status, err)
 	if err == nil {
 		// Preserve the pod IP across cache updates if the new IP is empty.
 		// When a pod is torn down, kubelet may race with PLEG and retrieve
 		// a pod status after network teardown, but the kubernetes API expects
 		// the completed pod's IP to be available after the pod is dead.
-		status.IPs = g.getPodIPs(pid, status)
+		status.IP = g.getPodIP(pid, status)
 	}
 
 	g.cache.Set(pod.ID, status, err, timestamp)
@@ -431,24 +438,6 @@ func getContainerState(pod *kubecontainer.Pod, cid *kubecontainer.ContainerID) p
 	}
 
 	return state
-}
-
-func updateRunningPodAndContainerMetrics(pods []*kubecontainer.Pod) {
-	// Set the number of running pods in the parameter
-	metrics.RunningPodCount.Set(float64(len(pods)))
-	// intermediate map to store the count of each "container_state"
-	containerStateCount := make(map[string]int)
-
-	for _, pod := range pods {
-		containers := pod.Containers
-		for _, container := range containers {
-			// update the corresponding "container_state" in map to set value for the gaugeVec metrics
-			containerStateCount[string(container.State)]++
-		}
-	}
-	for key, value := range containerStateCount {
-		metrics.RunningContainerCount.WithLabelValues(key).Set(float64(value))
-	}
 }
 
 func (pr podRecords) getOld(id types.UID) *kubecontainer.Pod {

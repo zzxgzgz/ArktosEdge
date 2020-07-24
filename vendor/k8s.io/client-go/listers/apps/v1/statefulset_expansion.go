@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -46,7 +47,7 @@ func (s *statefulSetLister) GetPodStatefulSets(pod *v1.Pod) ([]*apps.StatefulSet
 		return nil, fmt.Errorf("no StatefulSets found for pod %v because it has no labels", pod.Name)
 	}
 
-	list, err := s.StatefulSets(pod.Namespace).List(labels.Everything())
+	list, err := s.StatefulSetsWithMultiTenancy(pod.Namespace, pod.Tenant).List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +55,7 @@ func (s *statefulSetLister) GetPodStatefulSets(pod *v1.Pod) ([]*apps.StatefulSet
 	var psList []*apps.StatefulSet
 	for i := range list {
 		ps = list[i]
-		if ps.Namespace != pod.Namespace {
+		if ps.Namespace != pod.Namespace || ps.Tenant != pod.Tenant {
 			continue
 		}
 		selector, err = metav1.LabelSelectorAsSelector(ps.Spec.Selector)
@@ -70,7 +71,7 @@ func (s *statefulSetLister) GetPodStatefulSets(pod *v1.Pod) ([]*apps.StatefulSet
 	}
 
 	if len(psList) == 0 {
-		return nil, fmt.Errorf("could not find StatefulSet for pod %s in namespace %s with labels: %v", pod.Name, pod.Namespace, pod.Labels)
+		return nil, fmt.Errorf("could not find StatefulSet for pod %s in tenant %s namespace %s with labels: %v", pod.Name, pod.Tenant, pod.Namespace, pod.Labels)
 	}
 
 	return psList, nil

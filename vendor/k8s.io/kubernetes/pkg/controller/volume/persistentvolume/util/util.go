@@ -1,5 +1,6 @@
 /*
 Copyright 2019 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,10 +19,8 @@ package persistentvolume
 
 import (
 	"fmt"
-
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -70,16 +69,6 @@ const (
 	AnnStorageProvisioner = "volume.beta.kubernetes.io/storage-provisioner"
 )
 
-// IsDelayBindingProvisioning checks if claim provisioning with selected-node annotation
-func IsDelayBindingProvisioning(claim *v1.PersistentVolumeClaim) bool {
-	// When feature VolumeScheduling enabled,
-	// Scheduler signal to the PV controller to start dynamic
-	// provisioning by setting the "AnnSelectedNode" annotation
-	// in the PVC
-	_, ok := claim.Annotations[AnnSelectedNode]
-	return ok
-}
-
 // IsDelayBindingMode checks if claim is in delay binding mode.
 func IsDelayBindingMode(claim *v1.PersistentVolumeClaim, classLister storagelisters.StorageClassLister) (bool, error) {
 	className := v1helper.GetPersistentVolumeClaimClass(claim)
@@ -89,10 +78,7 @@ func IsDelayBindingMode(claim *v1.PersistentVolumeClaim, classLister storagelist
 
 	class, err := classLister.Get(className)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
+		return false, nil
 	}
 
 	if class.VolumeBindingMode == nil {
@@ -122,6 +108,7 @@ func GetBindVolumeToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolum
 	if volume.Spec.ClaimRef == nil ||
 		volume.Spec.ClaimRef.Name != claim.Name ||
 		volume.Spec.ClaimRef.Namespace != claim.Namespace ||
+		volume.Spec.ClaimRef.Tenant != claim.Tenant ||
 		volume.Spec.ClaimRef.UID != claim.UID {
 
 		claimRef, err := reference.GetReference(scheme.Scheme, claim)
@@ -142,13 +129,13 @@ func GetBindVolumeToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolum
 }
 
 // IsVolumeBoundToClaim returns true, if given volume is pre-bound or bound
-// to specific claim. Both claim.Name and claim.Namespace must be equal.
+// to specific claim. Both claim.Name and claim.Namespace and claim.Tenant must be equal.
 // If claim.UID is present in volume.Spec.ClaimRef, it must be equal too.
 func IsVolumeBoundToClaim(volume *v1.PersistentVolume, claim *v1.PersistentVolumeClaim) bool {
 	if volume.Spec.ClaimRef == nil {
 		return false
 	}
-	if claim.Name != volume.Spec.ClaimRef.Name || claim.Namespace != volume.Spec.ClaimRef.Namespace {
+	if claim.Tenant != volume.Spec.ClaimRef.Tenant || claim.Name != volume.Spec.ClaimRef.Name || claim.Namespace != volume.Spec.ClaimRef.Namespace {
 		return false
 	}
 	if volume.Spec.ClaimRef.UID != "" && claim.UID != volume.Spec.ClaimRef.UID {
@@ -207,8 +194,13 @@ func FindMatchingVolume(
 
 		volumeQty := volume.Spec.Capacity[v1.ResourceStorage]
 
+		// check if volumeModes do not match (feature gate protected)
+		isMismatch, err := CheckVolumeModeMismatches(&claim.Spec, &volume.Spec)
+		if err != nil {
+			return nil, fmt.Errorf("error checking if volumeMode was a mismatch: %v", err)
+		}
 		// filter out mismatching volumeModes
-		if CheckVolumeModeMismatches(&claim.Spec, &volume.Spec) {
+		if isMismatch {
 			continue
 		}
 
@@ -304,22 +296,9 @@ func FindMatchingVolume(
 
 // CheckVolumeModeMismatches is a convenience method that checks volumeMode for PersistentVolume
 // and PersistentVolumeClaims
-func CheckVolumeModeMismatches(pvcSpec *v1.PersistentVolumeClaimSpec, pvSpec *v1.PersistentVolumeSpec) bool {
+func CheckVolumeModeMismatches(pvcSpec *v1.PersistentVolumeClaimSpec, pvSpec *v1.PersistentVolumeSpec) (bool, error) {
 	if !utilfeature.DefaultFeatureGate.Enabled(features.BlockVolume) {
-		if pvcSpec.VolumeMode != nil && *pvcSpec.VolumeMode == v1.PersistentVolumeBlock {
-			// Block PVC does not match anything when the feature is off. We explicitly want
-			// to prevent binding block PVC to filesystem PV.
-			// The PVC should be ignored by PV controller.
-			return true
-		}
-		if pvSpec.VolumeMode != nil && *pvSpec.VolumeMode == v1.PersistentVolumeBlock {
-			// Block PV does not match anything when the feature is off. We explicitly want
-			// to prevent binding block PV to filesystem PVC.
-			// The PV should be ignored by PV controller.
-			return true
-		}
-		// Both PV + PVC are not block.
-		return false
+		return false, nil
 	}
 
 	// In HA upgrades, we cannot guarantee that the apiserver is on a version >= controller-manager.
@@ -332,7 +311,7 @@ func CheckVolumeModeMismatches(pvcSpec *v1.PersistentVolumeClaimSpec, pvSpec *v1
 	if pvSpec.VolumeMode != nil {
 		pvVolumeMode = *pvSpec.VolumeMode
 	}
-	return requestedVolumeMode != pvVolumeMode
+	return requestedVolumeMode != pvVolumeMode, nil
 }
 
 // CheckAccessModes returns true if PV satisfies all the PVC's requested AccessModes

@@ -48,7 +48,7 @@ func NewForConfig(c *rest.Config) (*ReliablesyncsV1alpha1Client, error) {
 	if err := setConfigDefaults(&config); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
+	client, err := rest.RESTClientFor(config.GetConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -72,12 +72,12 @@ func New(c rest.Interface) *ReliablesyncsV1alpha1Client {
 
 func setConfigDefaults(config *rest.Config) error {
 	gv := v1alpha1.SchemeGroupVersion
-	config.GroupVersion = &gv
-	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+	config.GetConfig().GroupVersion = &gv
+	config.GetConfig().APIPath = "/apis"
+	config.GetConfig().NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	if config.GetConfig().UserAgent == "" {
+		config.GetConfig().UserAgent = rest.DefaultKubernetesUserAgent()
 	}
 
 	return nil

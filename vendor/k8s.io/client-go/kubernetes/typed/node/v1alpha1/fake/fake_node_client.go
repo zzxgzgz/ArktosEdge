@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,6 +30,7 @@ type FakeNodeV1alpha1 struct {
 }
 
 func (c *FakeNodeV1alpha1) RuntimeClasses() v1alpha1.RuntimeClassInterface {
+
 	return &FakeRuntimeClasses{c}
 }
 
@@ -37,4 +39,11 @@ func (c *FakeNodeV1alpha1) RuntimeClasses() v1alpha1.RuntimeClassInterface {
 func (c *FakeNodeV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeNodeV1alpha1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

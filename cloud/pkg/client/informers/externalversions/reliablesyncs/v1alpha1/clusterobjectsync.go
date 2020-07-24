@@ -61,7 +61,7 @@ func NewFilteredClusterObjectSyncInformer(client versioned.Interface, resyncPeri
 				}
 				return client.ReliablesyncsV1alpha1().ClusterObjectSyncs().List(options)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options v1.ListOptions) watch.AggregatedWatchInterface {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}

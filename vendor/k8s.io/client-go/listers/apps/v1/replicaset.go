@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type ReplicaSetLister interface {
 	List(selector labels.Selector) (ret []*v1.ReplicaSet, err error)
 	// ReplicaSets returns an object that can list and get ReplicaSets.
 	ReplicaSets(namespace string) ReplicaSetNamespaceLister
+	ReplicaSetsWithMultiTenancy(namespace string, tenant string) ReplicaSetNamespaceLister
 	ReplicaSetListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *replicaSetLister) List(selector labels.Selector) (ret []*v1.ReplicaSet,
 
 // ReplicaSets returns an object that can list and get ReplicaSets.
 func (s *replicaSetLister) ReplicaSets(namespace string) ReplicaSetNamespaceLister {
-	return replicaSetNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return replicaSetNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *replicaSetLister) ReplicaSetsWithMultiTenancy(namespace string, tenant string) ReplicaSetNamespaceLister {
+	return replicaSetNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // ReplicaSetNamespaceLister helps list and get ReplicaSets.
 type ReplicaSetNamespaceLister interface {
-	// List lists all ReplicaSets in the indexer for a given namespace.
+	// List lists all ReplicaSets in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.ReplicaSet, err error)
-	// Get retrieves the ReplicaSet from the indexer for a given namespace and name.
+	// Get retrieves the ReplicaSet from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.ReplicaSet, error)
 	ReplicaSetNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type ReplicaSetNamespaceLister interface {
 type replicaSetNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all ReplicaSets in the indexer for a given namespace.
 func (s replicaSetNamespaceLister) List(selector labels.Selector) (ret []*v1.ReplicaSet, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.ReplicaSet))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s replicaSetNamespaceLister) List(selector labels.Selector) (ret []*v1.Rep
 
 // Get retrieves the ReplicaSet from the indexer for a given namespace and name.
 func (s replicaSetNamespaceLister) Get(name string) (*v1.ReplicaSet, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

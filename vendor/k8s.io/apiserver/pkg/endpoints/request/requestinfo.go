@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,7 +25,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/validation/path"
 	metainternalversion "k8s.io/apimachinery/pkg/apis/meta/internalversion"
-	metainternalversionscheme "k8s.io/apimachinery/pkg/apis/meta/internalversion/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -62,6 +62,8 @@ type RequestInfo struct {
 	Name string
 	// Parts are the path parts for the request, always starting with /{resource}/{name}
 	Parts []string
+
+	Tenant string
 }
 
 // specialVerbs contains just strings which are used in REST paths for special actions that don't fall under the normal
@@ -72,6 +74,10 @@ var specialVerbs = sets.NewString("proxy", "watch")
 
 // specialVerbsNoSubresources contains root verbs which do not allow subresources
 var specialVerbsNoSubresources = sets.NewString("proxy")
+
+// tenantSubresources contains subresources of tenant
+// this list allows the parser to distinguish between a tenant subresource, and a tenanted resource
+var tenantSubresources = sets.NewString("status", "finalize")
 
 // namespaceSubresources contains subresources of namespace
 // this list allows the parser to distinguish between a namespace subresource, and a namespaced resource
@@ -90,6 +96,32 @@ type RequestInfoFactory struct {
 // It handles both resource and non-resource requests and fills in all the pertinent information for each.
 // Valid Inputs:
 // Resource paths
+// /apis/{api-group}/{version}/tenants/{tenant}/namespaces
+// /api/{version}/tenants/{tenant}/namespaces
+// /api/{version}/tenants/{tenant}/namespaces/{namespace}
+// /api/{version}/tenants/{tenant}/namespaces/{namespace}/{resource}
+// /api/{version}/tenants/{tenant}/namespaces/{namespace}/{resource}/{resourceName}
+// /api/{version}/{resource}
+// /api/{version}/{resource}/{resourceName}
+//
+// Special verbs without subresources:
+// /api/{version}/proxy/{resource}/{resourceName}
+// /api/{version}/proxy/tenants/{tenant}/namespaces/{namespace}/{resource}/{resourceName}
+//
+// Special verbs with subresources:
+// /api/{version}/watch/{resource}
+// /api/{version}/watch/tenants/{tenant}/namespaces/{namespace}/{resource}
+//
+// NonResource paths
+// /apis/{api-group}/{version}
+// /apis/{api-group}
+// /apis
+// /api/{version}
+// /api
+// /healthz
+// /
+
+// For backward compatibility, the following legacy resource paths before multi-tenancy are still valid
 // /apis/{api-group}/{version}/namespaces
 // /api/{version}/namespaces
 // /api/{version}/namespaces/{namespace}
@@ -105,15 +137,6 @@ type RequestInfoFactory struct {
 // Special verbs with subresources:
 // /api/{version}/watch/{resource}
 // /api/{version}/watch/namespaces/{namespace}/{resource}
-//
-// NonResource paths
-// /apis/{api-group}/{version}
-// /apis/{api-group}
-// /apis
-// /api/{version}
-// /api
-// /healthz
-// /
 func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, error) {
 	// start with a non-resource request until proven otherwise
 	requestInfo := RequestInfo{
@@ -153,7 +176,7 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 	// handle input of form /{specialVerb}/*
 	if specialVerbs.Has(currentParts[0]) {
 		if len(currentParts) < 2 {
-			return &requestInfo, fmt.Errorf("unable to determine kind and namespace from url, %v", req.URL)
+			return &requestInfo, fmt.Errorf("unable to determine kind, namespace and tenant from url, %v", req.URL)
 		}
 
 		requestInfo.Verb = currentParts[0]
@@ -173,6 +196,18 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 			requestInfo.Verb = "delete"
 		default:
 			requestInfo.Verb = ""
+		}
+	}
+
+	// URL forms: /tenants/{tenant}/...,
+	if currentParts[0] == "tenants" {
+		if len(currentParts) > 2 && !tenantSubresources.Has(currentParts[2]) {
+			requestInfo.Tenant = currentParts[1]
+			currentParts = currentParts[2:]
+		} else {
+			// the Tenant is set to "" if it is not given. The tenant value may be resolved to "default" if the resource is tenant-scoped
+			// or namespace-scoped. But we just set it to "" here as we don't know the scope of the resource here.
+			requestInfo.Tenant = metav1.TenantNone
 		}
 	}
 
@@ -209,7 +244,7 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 	// if there's no name on the request and we thought it was a get before, then the actual verb is a list or a watch
 	if len(requestInfo.Name) == 0 && requestInfo.Verb == "get" {
 		opts := metainternalversion.ListOptions{}
-		if err := metainternalversionscheme.ParameterCodec.DecodeParameters(req.URL.Query(), metav1.SchemeGroupVersion, &opts); err != nil {
+		if err := metainternalversion.ParameterCodec.DecodeParameters(req.URL.Query(), metav1.SchemeGroupVersion, &opts); err != nil {
 			// An error in parsing request will result in default to "list" and not setting "name" field.
 			klog.Errorf("Couldn't parse request %#v: %v", req.URL.Query(), err)
 			// Reset opts to not rely on partial results from parsing.
@@ -238,6 +273,7 @@ func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, er
 			}
 		}
 	}
+
 	// if there's no name on the request and we thought it was a delete before, then the actual verb is deletecollection
 	if len(requestInfo.Name) == 0 && requestInfo.Verb == "delete" {
 		requestInfo.Verb = "deletecollection"

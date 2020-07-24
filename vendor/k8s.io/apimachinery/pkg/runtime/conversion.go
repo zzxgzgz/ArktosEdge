@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,17 +28,24 @@ import (
 	"k8s.io/apimachinery/pkg/conversion"
 )
 
-// DefaultMetaV1FieldSelectorConversion auto-accepts metav1 values for name and namespace.
-// A cluster scoped resource specifying namespace empty works fine and specifying a particular
-// namespace will return no results, as expected.
+// DefaultMetaV1FieldSelectorConversion auto-accepts metav1 values for name, namespace and tenant.
+// A cluster scoped resource specifying namespace and tenant empty works fine and specifying a particular
+// namespace or tenant will return no results, as expected.
 func DefaultMetaV1FieldSelectorConversion(label, value string) (string, string, error) {
 	switch label {
 	case "metadata.name":
 		return label, value, nil
 	case "metadata.namespace":
 		return label, value, nil
+	case "metadata.tenant":
+		return label, value, nil
+	case "metadata.hashkey":
+		return label, value, nil
 	default:
-		return "", "", fmt.Errorf("%q is not a known field selector: only %q, %q", label, "metadata.name", "metadata.namespace")
+		if strings.HasPrefix(label, "metadata.ownerReferences.hashkey.") {
+			return label, value, nil
+		}
+		return "", "", fmt.Errorf("%q is not a known field selector: only %q, %q, %q, %q, %q", label, "metadata.name", "metadata.namespace", "metadata.tenant", "metadata.hashkey", "metadata.ownerReferences.hashkey.*")
 	}
 }
 
@@ -61,21 +69,19 @@ var DefaultStringConversions = []interface{}{
 	Convert_Slice_string_To_int64,
 }
 
-func Convert_Slice_string_To_string(in *[]string, out *string, s conversion.Scope) error {
-	if len(*in) == 0 {
+func Convert_Slice_string_To_string(input *[]string, out *string, s conversion.Scope) error {
+	if len(*input) == 0 {
 		*out = ""
-		return nil
 	}
-	*out = (*in)[0]
+	*out = (*input)[0]
 	return nil
 }
 
-func Convert_Slice_string_To_int(in *[]string, out *int, s conversion.Scope) error {
-	if len(*in) == 0 {
+func Convert_Slice_string_To_int(input *[]string, out *int, s conversion.Scope) error {
+	if len(*input) == 0 {
 		*out = 0
-		return nil
 	}
-	str := (*in)[0]
+	str := (*input)[0]
 	i, err := strconv.Atoi(str)
 	if err != nil {
 		return err
@@ -85,16 +91,15 @@ func Convert_Slice_string_To_int(in *[]string, out *int, s conversion.Scope) err
 }
 
 // Convert_Slice_string_To_bool will convert a string parameter to boolean.
-// Only the absence of a value (i.e. zero-length slice), a value of "false", or a
-// value of "0" resolve to false.
+// Only the absence of a value, a value of "false", or a value of "0" resolve to false.
 // Any other value (including empty string) resolves to true.
-func Convert_Slice_string_To_bool(in *[]string, out *bool, s conversion.Scope) error {
-	if len(*in) == 0 {
+func Convert_Slice_string_To_bool(input *[]string, out *bool, s conversion.Scope) error {
+	if len(*input) == 0 {
 		*out = false
 		return nil
 	}
-	switch {
-	case (*in)[0] == "0", strings.EqualFold((*in)[0], "false"):
+	switch strings.ToLower((*input)[0]) {
+	case "false", "0":
 		*out = false
 	default:
 		*out = true
@@ -102,79 +107,15 @@ func Convert_Slice_string_To_bool(in *[]string, out *bool, s conversion.Scope) e
 	return nil
 }
 
-// Convert_Slice_string_To_bool will convert a string parameter to boolean.
-// Only the absence of a value (i.e. zero-length slice), a value of "false", or a
-// value of "0" resolve to false.
-// Any other value (including empty string) resolves to true.
-func Convert_Slice_string_To_Pointer_bool(in *[]string, out **bool, s conversion.Scope) error {
-	if len(*in) == 0 {
-		boolVar := false
-		*out = &boolVar
-		return nil
-	}
-	switch {
-	case (*in)[0] == "0", strings.EqualFold((*in)[0], "false"):
-		boolVar := false
-		*out = &boolVar
-	default:
-		boolVar := true
-		*out = &boolVar
-	}
-	return nil
-}
-
-func string_to_int64(in string) (int64, error) {
-	return strconv.ParseInt(in, 10, 64)
-}
-
-func Convert_string_To_int64(in *string, out *int64, s conversion.Scope) error {
-	if in == nil {
+func Convert_Slice_string_To_int64(input *[]string, out *int64, s conversion.Scope) error {
+	if len(*input) == 0 {
 		*out = 0
-		return nil
 	}
-	i, err := string_to_int64(*in)
+	str := (*input)[0]
+	i, err := strconv.ParseInt(str, 10, 64)
 	if err != nil {
 		return err
 	}
 	*out = i
-	return nil
-}
-
-func Convert_Slice_string_To_int64(in *[]string, out *int64, s conversion.Scope) error {
-	if len(*in) == 0 {
-		*out = 0
-		return nil
-	}
-	i, err := string_to_int64((*in)[0])
-	if err != nil {
-		return err
-	}
-	*out = i
-	return nil
-}
-
-func Convert_string_To_Pointer_int64(in *string, out **int64, s conversion.Scope) error {
-	if in == nil {
-		*out = nil
-		return nil
-	}
-	i, err := string_to_int64(*in)
-	if err != nil {
-		return err
-	}
-	*out = &i
-	return nil
-}
-
-func Convert_Slice_string_To_Pointer_int64(in *[]string, out **int64, s conversion.Scope) error {
-	if len(*in) == 0 {
-		*out = nil
-		return nil
-	}
-	i, err := string_to_int64((*in)[0])
-	if err != nil {
-		return err
-	}
-	*out = &i
 	return nil
 }

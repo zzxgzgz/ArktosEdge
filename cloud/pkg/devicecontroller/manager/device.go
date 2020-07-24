@@ -5,7 +5,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/rest"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 
 	"github.com/kubeedge/kubeedge/cloud/pkg/apis/devices/v1alpha1"
@@ -27,8 +27,8 @@ func (dmm *DeviceManager) Events() chan watch.Event {
 }
 
 // NewDeviceManager create DeviceManager from config
-func NewDeviceManager(crdClient *rest.RESTClient, namespace string) (*DeviceManager, error) {
-	lw := cache.NewListWatchFromClient(crdClient, "devices", namespace, fields.Everything())
+func NewDeviceManager(client *kubernetes.Clientset, namespace string) (*DeviceManager, error) {
+	lw := cache.NewListWatchFromClient(client, "devices", namespace, fields.Everything())
 	events := make(chan watch.Event, config.Config.Buffer.DeviceEvent)
 	rh := NewCommonResourceEventHandler(events)
 	si := cache.NewSharedInformer(lw, &v1alpha1.Device{}, 0)

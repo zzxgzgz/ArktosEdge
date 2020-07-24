@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type PodDisruptionBudgetLister interface {
 	List(selector labels.Selector) (ret []*v1beta1.PodDisruptionBudget, err error)
 	// PodDisruptionBudgets returns an object that can list and get PodDisruptionBudgets.
 	PodDisruptionBudgets(namespace string) PodDisruptionBudgetNamespaceLister
+	PodDisruptionBudgetsWithMultiTenancy(namespace string, tenant string) PodDisruptionBudgetNamespaceLister
 	PodDisruptionBudgetListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *podDisruptionBudgetLister) List(selector labels.Selector) (ret []*v1bet
 
 // PodDisruptionBudgets returns an object that can list and get PodDisruptionBudgets.
 func (s *podDisruptionBudgetLister) PodDisruptionBudgets(namespace string) PodDisruptionBudgetNamespaceLister {
-	return podDisruptionBudgetNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return podDisruptionBudgetNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *podDisruptionBudgetLister) PodDisruptionBudgetsWithMultiTenancy(namespace string, tenant string) PodDisruptionBudgetNamespaceLister {
+	return podDisruptionBudgetNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // PodDisruptionBudgetNamespaceLister helps list and get PodDisruptionBudgets.
 type PodDisruptionBudgetNamespaceLister interface {
-	// List lists all PodDisruptionBudgets in the indexer for a given namespace.
+	// List lists all PodDisruptionBudgets in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1beta1.PodDisruptionBudget, err error)
-	// Get retrieves the PodDisruptionBudget from the indexer for a given namespace and name.
+	// Get retrieves the PodDisruptionBudget from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1beta1.PodDisruptionBudget, error)
 	PodDisruptionBudgetNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type PodDisruptionBudgetNamespaceLister interface {
 type podDisruptionBudgetNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all PodDisruptionBudgets in the indexer for a given namespace.
 func (s podDisruptionBudgetNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.PodDisruptionBudget, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1beta1.PodDisruptionBudget))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s podDisruptionBudgetNamespaceLister) List(selector labels.Selector) (ret 
 
 // Get retrieves the PodDisruptionBudget from the indexer for a given namespace and name.
 func (s podDisruptionBudgetNamespaceLister) Get(name string) (*v1beta1.PodDisruptionBudget, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

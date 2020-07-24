@@ -19,7 +19,6 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +27,6 @@ import (
 	info "github.com/google/cadvisor/info/v1"
 	"github.com/google/cadvisor/utils"
 	"github.com/karrick/godirwalk"
-	"github.com/opencontainers/runc/libcontainer/cgroups"
 	"github.com/pkg/errors"
 
 	"k8s.io/klog"
@@ -47,25 +45,6 @@ func DebugInfo(watches map[string][]string) map[string][]string {
 	out["Inotify watches"] = lines
 
 	return out
-}
-
-// findFileInAncestorDir returns the path to the parent directory that contains the specified file.
-// "" is returned if the lookup reaches the limit.
-func findFileInAncestorDir(current, file, limit string) (string, error) {
-	for {
-		fpath := path.Join(current, file)
-		_, err := os.Stat(fpath)
-		if err == nil {
-			return current, nil
-		}
-		if !os.IsNotExist(err) {
-			return "", err
-		}
-		if current == limit {
-			return "", nil
-		}
-		current = filepath.Dir(current)
-	}
 }
 
 func GetSpec(cgroupPaths map[string]string, machineInfoFactory info.MachineInfoFactory, hasNetwork, hasFilesystem bool) (info.ContainerSpec, error) {
@@ -121,12 +100,7 @@ func GetSpec(cgroupPaths map[string]string, machineInfoFactory info.MachineInfoF
 	if ok {
 		if utils.FileExists(cpusetRoot) {
 			spec.HasCpu = true
-			mask := ""
-			if cgroups.IsCgroup2UnifiedMode() {
-				mask = readString(cpusetRoot, "cpuset.cpus.effective")
-			} else {
-				mask = readString(cpusetRoot, "cpuset.cpus")
-			}
+			mask := readString(cpusetRoot, "cpuset.cpus")
 			spec.Cpu.Mask = utils.FixCpuMask(mask, mi.NumCores)
 		}
 	}
@@ -134,44 +108,18 @@ func GetSpec(cgroupPaths map[string]string, machineInfoFactory info.MachineInfoF
 	// Memory
 	memoryRoot, ok := cgroupPaths["memory"]
 	if ok {
-		if !cgroups.IsCgroup2UnifiedMode() {
-			if utils.FileExists(memoryRoot) {
-				spec.HasMemory = true
-				spec.Memory.Limit = readUInt64(memoryRoot, "memory.limit_in_bytes")
-				spec.Memory.SwapLimit = readUInt64(memoryRoot, "memory.memsw.limit_in_bytes")
-				spec.Memory.Reservation = readUInt64(memoryRoot, "memory.soft_limit_in_bytes")
-			}
-		} else {
-			memoryRoot, err := findFileInAncestorDir(memoryRoot, "memory.max", "/sys/fs/cgroup")
-			if err != nil {
-				return spec, err
-			}
-			if memoryRoot != "" {
-				spec.HasMemory = true
-				spec.Memory.Reservation = readUInt64(memoryRoot, "memory.high")
-				spec.Memory.Limit = readUInt64(memoryRoot, "memory.max")
-				spec.Memory.SwapLimit = readUInt64(memoryRoot, "memory.swap.max")
-			}
-		}
-	}
-
-	// Processes, read it's value from pids path directly
-	pidsRoot, ok := cgroupPaths["pids"]
-	if ok {
-		if utils.FileExists(pidsRoot) {
-			spec.HasProcesses = true
-			spec.Processes.Limit = readUInt64(pidsRoot, "pids.max")
+		if utils.FileExists(memoryRoot) {
+			spec.HasMemory = true
+			spec.Memory.Limit = readUInt64(memoryRoot, "memory.limit_in_bytes")
+			spec.Memory.SwapLimit = readUInt64(memoryRoot, "memory.memsw.limit_in_bytes")
+			spec.Memory.Reservation = readUInt64(memoryRoot, "memory.soft_limit_in_bytes")
 		}
 	}
 
 	spec.HasNetwork = hasNetwork
 	spec.HasFilesystem = hasFilesystem
 
-	ioControllerName := "blkio"
-	if cgroups.IsCgroup2UnifiedMode() {
-		ioControllerName = "io"
-	}
-	if blkioRoot, ok := cgroupPaths[ioControllerName]; ok && utils.FileExists(blkioRoot) {
+	if blkioRoot, ok := cgroupPaths["blkio"]; ok && utils.FileExists(blkioRoot) {
 		spec.HasDiskIo = true
 	}
 
@@ -195,7 +143,7 @@ func readString(dirpath string, file string) string {
 
 func readUInt64(dirpath string, file string) uint64 {
 	out := readString(dirpath, file)
-	if out == "" || out == "max" {
+	if out == "" {
 		return 0
 	}
 

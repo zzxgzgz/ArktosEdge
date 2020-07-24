@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type RoleBindingLister interface {
 	List(selector labels.Selector) (ret []*v1.RoleBinding, err error)
 	// RoleBindings returns an object that can list and get RoleBindings.
 	RoleBindings(namespace string) RoleBindingNamespaceLister
+	RoleBindingsWithMultiTenancy(namespace string, tenant string) RoleBindingNamespaceLister
 	RoleBindingListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *roleBindingLister) List(selector labels.Selector) (ret []*v1.RoleBindin
 
 // RoleBindings returns an object that can list and get RoleBindings.
 func (s *roleBindingLister) RoleBindings(namespace string) RoleBindingNamespaceLister {
-	return roleBindingNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return roleBindingNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *roleBindingLister) RoleBindingsWithMultiTenancy(namespace string, tenant string) RoleBindingNamespaceLister {
+	return roleBindingNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // RoleBindingNamespaceLister helps list and get RoleBindings.
 type RoleBindingNamespaceLister interface {
-	// List lists all RoleBindings in the indexer for a given namespace.
+	// List lists all RoleBindings in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.RoleBinding, err error)
-	// Get retrieves the RoleBinding from the indexer for a given namespace and name.
+	// Get retrieves the RoleBinding from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.RoleBinding, error)
 	RoleBindingNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type RoleBindingNamespaceLister interface {
 type roleBindingNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all RoleBindings in the indexer for a given namespace.
 func (s roleBindingNamespaceLister) List(selector labels.Selector) (ret []*v1.RoleBinding, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.RoleBinding))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s roleBindingNamespaceLister) List(selector labels.Selector) (ret []*v1.Ro
 
 // Get retrieves the RoleBinding from the indexer for a given namespace and name.
 func (s roleBindingNamespaceLister) Get(name string) (*v1.RoleBinding, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

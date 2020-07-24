@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -88,6 +89,7 @@ func (g *factoryGenerator) GenerateType(c *generator.Context, t *types.Type, w i
 		"schemaGroupVersionResource":     c.Universe.Type(schemaGroupVersionResource),
 		"syncMutex":                      c.Universe.Type(syncMutex),
 		"timeDuration":                   c.Universe.Type(timeDuration),
+		"tenantAll":                      c.Universe.Type(metav1TenantAll),
 		"namespaceAll":                   c.Universe.Type(metav1NamespaceAll),
 		"object":                         c.Universe.Type(metav1Object),
 	}
@@ -104,6 +106,7 @@ type SharedInformerOption func(*sharedInformerFactory) *sharedInformerFactory
 
 type sharedInformerFactory struct {
 	client {{.clientSetInterface|raw}}
+	tenant    string
 	namespace string
 	tweakListOptions {{.interfacesTweakListOptionsFunc|raw}}
 	lock {{.syncMutex|raw}}
@@ -136,8 +139,13 @@ func WithTweakListOptions(tweakListOptions internalinterfaces.TweakListOptionsFu
 
 // WithNamespace limits the SharedInformerFactory to the specified namespace.
 func WithNamespace(namespace string) SharedInformerOption {
-	return func(factory *sharedInformerFactory) *sharedInformerFactory {
+	return WithNamespaceWithMultiTenancy(namespace, "$.DefaultTenant$")
+}
+
+func WithNamespaceWithMultiTenancy(namespace string, tenant string) SharedInformerOption {
+	return func(factory *sharedInformerFactory) *sharedInformerFactory {		
 		factory.namespace = namespace
+		factory.tenant = tenant
 		return factory
 	}
 }
@@ -152,13 +160,18 @@ func NewSharedInformerFactory(client {{.clientSetInterface|raw}}, defaultResync 
 // as specified here.
 // Deprecated: Please use NewSharedInformerFactoryWithOptions instead
 func NewFilteredSharedInformerFactory(client {{.clientSetInterface|raw}}, defaultResync {{.timeDuration|raw}}, namespace string, tweakListOptions {{.interfacesTweakListOptionsFunc|raw}}) SharedInformerFactory {
-	return NewSharedInformerFactoryWithOptions(client, defaultResync, WithNamespace(namespace), WithTweakListOptions(tweakListOptions))
+	return NewFilteredSharedInformerFactoryWithMultiTenancy(client, defaultResync, namespace, tweakListOptions, "$.DefaultTenant$")
+}
+
+func NewFilteredSharedInformerFactoryWithMultiTenancy(client {{.clientSetInterface|raw}}, defaultResync {{.timeDuration|raw}}, namespace string, tweakListOptions {{.interfacesTweakListOptionsFunc|raw}}, tenant string) SharedInformerFactory {
+	return NewSharedInformerFactoryWithOptions(client, defaultResync, WithNamespaceWithMultiTenancy(namespace, tenant), WithTweakListOptions(tweakListOptions))
 }
 
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client {{.clientSetInterface|raw}}, defaultResync {{.timeDuration|raw}}, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &sharedInformerFactory{
 		client:           client,
+		tenant:           v1.TenantAll,
 		namespace:        v1.NamespaceAll,
 		defaultResync:    defaultResync,
 		informers:        make(map[{{.reflectType|raw}}]{{.cacheSharedIndexInformer|raw}}),
@@ -252,7 +265,7 @@ type SharedInformerFactory interface {
 {{$gvGoNames := .gvGoNames}}
 {{range $groupPkgName, $group := .groupVersions}}
 func (f *sharedInformerFactory) {{index $gvGoNames $groupPkgName}}() {{index $gvInterfaces $groupPkgName|raw}} {
-  return {{index $gvNewFuncs $groupPkgName|raw}}(f, f.namespace, f.tweakListOptions)
+  return {{index $gvNewFuncs $groupPkgName|raw}}WithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 {{end}}
 `

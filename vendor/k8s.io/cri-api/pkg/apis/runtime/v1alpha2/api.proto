@@ -1,5 +1,6 @@
 /*
 Copyright 2018 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -107,6 +108,23 @@ service RuntimeService {
 
     // Status returns the status of the runtime.
     rpc Status(StatusRequest) returns (StatusResponse) {}
+
+    // RebootVM reboots the VM domain and returns error msg if there is any
+    rpc RebootVM(RebootVMRequest) returns (RebootVMResponse) {}
+
+    // CreateSnapshot creates a snapshot of the current VM domain
+    rpc CreateSnapshot(CreateSnapshotRequest) returns (CreateSnapshotResponse) {}
+
+    // RestoreToSnapshot restores the current VM domain to the given snapshot
+    rpc RestoreToSnapshot(RestoreToSnapshotRequest) returns (RestoreToSnapshotResponse) {}
+
+    // AttachNetworkInterface adds new NIC to the POD-VM
+    rpc AttachNetworkInterface(DeviceAttachDetachRequest) returns (DeviceAttachDetachResponse) {}
+    // DetachNetworkInterface removes a NIC to the POD-VM
+    rpc DetachNetworkInterface(DeviceAttachDetachRequest) returns (DeviceAttachDetachResponse) {}
+    // ListNetworkInterfaces lists NICs attached to the POD-VM
+    rpc ListNetworkInterfaces(ListDeviceRequest) returns (ListDeviceResponse) {}
+
 }
 
 // ImageService defines the public APIs for managing images.
@@ -303,6 +321,8 @@ message PodSandboxMetadata {
     string namespace = 3;
     // Attempt number of creating the sandbox. Default: 0.
     uint32 attempt = 4;
+    // Pod tenant of the sandbox. Same as the pod tenant in the PodSpec.
+    string tenant = 5;
 }
 
 // PodSandboxConfig holds all the required and optional fields for creating a
@@ -396,17 +416,34 @@ message PodSandboxStatusRequest {
     bool verbose = 2;
 }
 
-// PodIP represents an ip of a Pod
-message PodIP{
-    // an ip is a string representation of an IPv4 or an IPv6
-    string ip = 1;
-}
 // PodSandboxNetworkStatus is the status of the network for a PodSandbox.
 message PodSandboxNetworkStatus {
     // IP address of the PodSandbox.
     string ip = 1;
-    // list of additional ips (not inclusive of PodSandboxNetworkStatus.Ip) of the PodSandBoxNetworkStatus
-    repeated PodIP additional_ips  = 2;
+
+    // details of nics 
+    repeated NICStatus nics = 2;
+}
+
+enum NICState {
+    NIC_UNKNOWN    = 0;
+    NIC_INPROGRESS = 1;
+    NIC_READY      = 2;
+    NIC_FAILED     = 3;
+}
+
+message NICStatus {
+    // Name of nic
+    string name = 1;
+
+    // ID of nic
+    string port_id = 2;
+
+    // Lifecycle state of nic
+    NICState state = 3;
+
+    // Brief CamelCase string explaining why nic is in its current state.
+    string reason = 4;
 }
 
 // Namespace contains paths to the namespaces.
@@ -912,6 +949,8 @@ message ContainerStatus {
     repeated Mount mounts = 14;
     // Log path of container.
     string log_path = 15;
+    // Resource configuration of the container.
+    LinuxContainerResources resources = 16;
 }
 
 message ContainerStatusResponse {
@@ -1278,4 +1317,71 @@ message ReopenContainerLogRequest {
 }
 
 message ReopenContainerLogResponse{
+}
+
+message VmRebootSpec {
+    // time to wait before the reboot of the guest OS
+    int64 delayInSeconds = 1;
+    // virDomainRebootFlagValue for libvirt
+    int64 domainRebootFlag = 2;
+}
+
+message RebootVMRequest {
+    // ID of the VM to reboot
+    string vm_id = 1;
+    // Parameters for rebooting the domain
+    VmRebootSpec rebootSpec = 2;
+}
+
+message RebootVMResponse {}
+
+message CreateSnapshotRequest {
+    // ID of the VM 
+    string vmID = 1;
+    // Desired snapshot ID 
+    string snapshotID = 2;
+    // Flags for future extension. Now it should be 0.
+    int64 flags = 3;
+}
+
+message CreateSnapshotResponse {}
+
+message RestoreToSnapshotRequest {
+    // ID of the VM 
+    string vmID = 1;
+    // Target snapshot ID
+    string snapshotID = 2;
+    // Flags for future extension. Now it should be 0.
+    int64 flags = 3;
+}
+
+message RestoreToSnapshotResponse {}
+
+message NicSpec {
+    // Name of the NIC to the VM
+    string Name = 1;
+    string SubnetName = 2;
+    string PortId = 3;
+    string IpAddress = 4;
+    bool IsIpV6Enabled = 5;
+    string tag = 6;
+    string VPC = 7;
+}
+
+message DeviceAttachDetachRequest {
+    string PodSandboxID = 1;
+    string VmName = 2;
+    NicSpec Nic = 3;
+}
+
+message DeviceAttachDetachResponse {}
+
+message ListDeviceRequest{
+     string PodSandboxId = 1;
+     string VmName = 2;
+     string NicName = 3;
+}
+
+message ListDeviceResponse {
+    repeated NicSpec Nics = 1;
 }

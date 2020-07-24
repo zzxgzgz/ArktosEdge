@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakeServices struct {
 	Fake *FakeCoreV1
 	ns   string
+	te   string
 }
 
 var servicesResource = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}
@@ -41,18 +43,19 @@ var servicesKind = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Serv
 // Get takes name of the service, and returns the corresponding service object, and an error if there is any.
 func (c *FakeServices) Get(name string, options v1.GetOptions) (result *corev1.Service, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(servicesResource, c.ns, name), &corev1.Service{})
+		Invokes(testing.NewGetActionWithMultiTenancy(servicesResource, c.ns, name, c.te), &corev1.Service{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Service), err
 }
 
 // List takes label and field selectors, and returns the list of Services that match those selectors.
 func (c *FakeServices) List(opts v1.ListOptions) (result *corev1.ServiceList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(servicesResource, servicesKind, c.ns, opts), &corev1.ServiceList{})
+		Invokes(testing.NewListActionWithMultiTenancy(servicesResource, servicesKind, c.ns, opts, c.te), &corev1.ServiceList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,32 +74,37 @@ func (c *FakeServices) List(opts v1.ListOptions) (result *corev1.ServiceList, er
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested services.
-func (c *FakeServices) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(servicesResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested services.
+func (c *FakeServices) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(servicesResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a service and creates it.  Returns the server's representation of the service, and an error, if there is any.
 func (c *FakeServices) Create(service *corev1.Service) (result *corev1.Service, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(servicesResource, c.ns, service), &corev1.Service{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(servicesResource, c.ns, service, c.te), &corev1.Service{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Service), err
 }
 
 // Update takes the representation of a service and updates it. Returns the server's representation of the service, and an error, if there is any.
 func (c *FakeServices) Update(service *corev1.Service) (result *corev1.Service, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(servicesResource, c.ns, service), &corev1.Service{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(servicesResource, c.ns, service, c.te), &corev1.Service{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Service), err
 }
 
@@ -104,7 +112,7 @@ func (c *FakeServices) Update(service *corev1.Service) (result *corev1.Service, 
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 func (c *FakeServices) UpdateStatus(service *corev1.Service) (*corev1.Service, error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(servicesResource, "status", c.ns, service), &corev1.Service{})
+		Invokes(testing.NewUpdateSubresourceActionWithMultiTenancy(servicesResource, "status", c.ns, service, c.te), &corev1.Service{})
 
 	if obj == nil {
 		return nil, err
@@ -115,7 +123,7 @@ func (c *FakeServices) UpdateStatus(service *corev1.Service) (*corev1.Service, e
 // Delete takes name of the service and deletes it. Returns an error if one occurs.
 func (c *FakeServices) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(servicesResource, c.ns, name), &corev1.Service{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(servicesResource, c.ns, name, c.te), &corev1.Service{})
 
 	return err
 }
@@ -123,10 +131,11 @@ func (c *FakeServices) Delete(name string, options *v1.DeleteOptions) error {
 // Patch applies the patch and returns the patched service.
 func (c *FakeServices) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *corev1.Service, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(servicesResource, c.ns, name, pt, data, subresources...), &corev1.Service{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(servicesResource, c.te, c.ns, name, pt, data, subresources...), &corev1.Service{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Service), err
 }

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,5 +33,10 @@ func (m *kubeGenericRuntimeManager) ReadLogs(ctx context.Context, path, containe
 	// Convert v1.PodLogOptions into internal log options.
 	opts := logs.NewLogOptions(apiOpts, time.Now())
 
-	return logs.ReadLogs(ctx, path, containerID, opts, m.runtimeService, stdout, stderr)
+	runtimeService, err := m.GetRuntimeServiceByContainerIDString(containerID)
+	if err != nil {
+		return err
+	}
+
+	return logs.ReadLogs(ctx, path, containerID, opts, runtimeService, stdout, stderr)
 }

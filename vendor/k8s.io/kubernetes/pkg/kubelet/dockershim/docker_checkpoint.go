@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,7 +35,7 @@ const (
 
 type DockershimCheckpoint interface {
 	checkpointmanager.Checkpoint
-	GetData() (string, string, string, []*PortMapping, bool)
+	GetData() (string, string, string, string, []*PortMapping, bool)
 }
 
 type Protocol string
@@ -69,11 +70,14 @@ type PodSandboxCheckpoint struct {
 	Data *CheckpointData `json:"data,omitempty"`
 	// Checksum is calculated with fnv hash of the checkpoint object with checksum field set to be zero
 	Checksum checksum.Checksum `json:"checksum"`
+
+	Tenant string `json:"tenant"`
 }
 
-func NewPodSandboxCheckpoint(namespace, name string, data *CheckpointData) DockershimCheckpoint {
+func NewPodSandboxCheckpoint(tenant, namespace, name string, data *CheckpointData) DockershimCheckpoint {
 	return &PodSandboxCheckpoint{
 		Version:   schemaVersion,
+		Tenant:    tenant,
 		Namespace: namespace,
 		Name:      name,
 		Data:      data,
@@ -93,6 +97,6 @@ func (cp *PodSandboxCheckpoint) VerifyChecksum() error {
 	return cp.Checksum.Verify(*cp.Data)
 }
 
-func (cp *PodSandboxCheckpoint) GetData() (string, string, string, []*PortMapping, bool) {
-	return cp.Version, cp.Name, cp.Namespace, cp.Data.PortMappings, cp.Data.HostNetwork
+func (cp *PodSandboxCheckpoint) GetData() (string, string, string, string, []*PortMapping, bool) {
+	return cp.Version, cp.Name, cp.Namespace, cp.Tenant, cp.Data.PortMappings, cp.Data.HostNetwork
 }

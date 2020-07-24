@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +23,7 @@ import (
 
 // IsControlledBy checks if the  object has a controllerRef set to the given owner
 func IsControlledBy(obj Object, owner Object) bool {
-	ref := GetControllerOfNoCopy(obj)
+	ref := GetControllerOf(obj)
 	if ref == nil {
 		return false
 	}
@@ -31,20 +32,9 @@ func IsControlledBy(obj Object, owner Object) bool {
 
 // GetControllerOf returns a pointer to a copy of the controllerRef if controllee has a controller
 func GetControllerOf(controllee Object) *OwnerReference {
-	ref := GetControllerOfNoCopy(controllee)
-	if ref == nil {
-		return nil
-	}
-	cp := *ref
-	return &cp
-}
-
-// GetControllerOf returns a pointer to the controllerRef if controllee has a controller
-func GetControllerOfNoCopy(controllee Object) *OwnerReference {
-	refs := controllee.GetOwnerReferences()
-	for i := range refs {
-		if refs[i].Controller != nil && *refs[i].Controller {
-			return &refs[i]
+	for _, ref := range controllee.GetOwnerReferences() {
+		if ref.Controller != nil && *ref.Controller {
+			return &ref
 		}
 	}
 	return nil
@@ -59,6 +49,7 @@ func NewControllerRef(owner Object, gvk schema.GroupVersionKind) *OwnerReference
 		Kind:               gvk.Kind,
 		Name:               owner.GetName(),
 		UID:                owner.GetUID(),
+		HashKey:            owner.GetHashKey(),
 		BlockOwnerDeletion: &blockOwnerDeletion,
 		Controller:         &isController,
 	}

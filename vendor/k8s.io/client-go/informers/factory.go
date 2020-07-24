@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,10 +35,8 @@ import (
 	certificates "k8s.io/client-go/informers/certificates"
 	coordination "k8s.io/client-go/informers/coordination"
 	core "k8s.io/client-go/informers/core"
-	discovery "k8s.io/client-go/informers/discovery"
 	events "k8s.io/client-go/informers/events"
 	extensions "k8s.io/client-go/informers/extensions"
-	flowcontrol "k8s.io/client-go/informers/flowcontrol"
 	internalinterfaces "k8s.io/client-go/informers/internalinterfaces"
 	networking "k8s.io/client-go/informers/networking"
 	node "k8s.io/client-go/informers/node"
@@ -55,6 +54,7 @@ type SharedInformerOption func(*sharedInformerFactory) *sharedInformerFactory
 
 type sharedInformerFactory struct {
 	client           kubernetes.Interface
+	tenant           string
 	namespace        string
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
 	lock             sync.Mutex
@@ -87,8 +87,13 @@ func WithTweakListOptions(tweakListOptions internalinterfaces.TweakListOptionsFu
 
 // WithNamespace limits the SharedInformerFactory to the specified namespace.
 func WithNamespace(namespace string) SharedInformerOption {
+	return WithNamespaceWithMultiTenancy(namespace, "$.DefaultTenant$")
+}
+
+func WithNamespaceWithMultiTenancy(namespace string, tenant string) SharedInformerOption {
 	return func(factory *sharedInformerFactory) *sharedInformerFactory {
 		factory.namespace = namespace
+		factory.tenant = tenant
 		return factory
 	}
 }
@@ -103,13 +108,18 @@ func NewSharedInformerFactory(client kubernetes.Interface, defaultResync time.Du
 // as specified here.
 // Deprecated: Please use NewSharedInformerFactoryWithOptions instead
 func NewFilteredSharedInformerFactory(client kubernetes.Interface, defaultResync time.Duration, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc) SharedInformerFactory {
-	return NewSharedInformerFactoryWithOptions(client, defaultResync, WithNamespace(namespace), WithTweakListOptions(tweakListOptions))
+	return NewFilteredSharedInformerFactoryWithMultiTenancy(client, defaultResync, namespace, tweakListOptions, "$.DefaultTenant$")
+}
+
+func NewFilteredSharedInformerFactoryWithMultiTenancy(client kubernetes.Interface, defaultResync time.Duration, namespace string, tweakListOptions internalinterfaces.TweakListOptionsFunc, tenant string) SharedInformerFactory {
+	return NewSharedInformerFactoryWithOptions(client, defaultResync, WithNamespaceWithMultiTenancy(namespace, tenant), WithTweakListOptions(tweakListOptions))
 }
 
 // NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
 func NewSharedInformerFactoryWithOptions(client kubernetes.Interface, defaultResync time.Duration, options ...SharedInformerOption) SharedInformerFactory {
 	factory := &sharedInformerFactory{
 		client:           client,
+		tenant:           v1.TenantAll,
 		namespace:        v1.NamespaceAll,
 		defaultResync:    defaultResync,
 		informers:        make(map[reflect.Type]cache.SharedIndexInformer),
@@ -198,10 +208,8 @@ type SharedInformerFactory interface {
 	Certificates() certificates.Interface
 	Coordination() coordination.Interface
 	Core() core.Interface
-	Discovery() discovery.Interface
 	Events() events.Interface
 	Extensions() extensions.Interface
-	Flowcontrol() flowcontrol.Interface
 	Networking() networking.Interface
 	Node() node.Interface
 	Policy() policy.Interface
@@ -212,77 +220,69 @@ type SharedInformerFactory interface {
 }
 
 func (f *sharedInformerFactory) Admissionregistration() admissionregistration.Interface {
-	return admissionregistration.New(f, f.namespace, f.tweakListOptions)
+	return admissionregistration.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Apps() apps.Interface {
-	return apps.New(f, f.namespace, f.tweakListOptions)
+	return apps.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Auditregistration() auditregistration.Interface {
-	return auditregistration.New(f, f.namespace, f.tweakListOptions)
+	return auditregistration.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Autoscaling() autoscaling.Interface {
-	return autoscaling.New(f, f.namespace, f.tweakListOptions)
+	return autoscaling.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Batch() batch.Interface {
-	return batch.New(f, f.namespace, f.tweakListOptions)
+	return batch.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Certificates() certificates.Interface {
-	return certificates.New(f, f.namespace, f.tweakListOptions)
+	return certificates.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Coordination() coordination.Interface {
-	return coordination.New(f, f.namespace, f.tweakListOptions)
+	return coordination.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Core() core.Interface {
-	return core.New(f, f.namespace, f.tweakListOptions)
-}
-
-func (f *sharedInformerFactory) Discovery() discovery.Interface {
-	return discovery.New(f, f.namespace, f.tweakListOptions)
+	return core.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Events() events.Interface {
-	return events.New(f, f.namespace, f.tweakListOptions)
+	return events.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Extensions() extensions.Interface {
-	return extensions.New(f, f.namespace, f.tweakListOptions)
-}
-
-func (f *sharedInformerFactory) Flowcontrol() flowcontrol.Interface {
-	return flowcontrol.New(f, f.namespace, f.tweakListOptions)
+	return extensions.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Networking() networking.Interface {
-	return networking.New(f, f.namespace, f.tweakListOptions)
+	return networking.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Node() node.Interface {
-	return node.New(f, f.namespace, f.tweakListOptions)
+	return node.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Policy() policy.Interface {
-	return policy.New(f, f.namespace, f.tweakListOptions)
+	return policy.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Rbac() rbac.Interface {
-	return rbac.New(f, f.namespace, f.tweakListOptions)
+	return rbac.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Scheduling() scheduling.Interface {
-	return scheduling.New(f, f.namespace, f.tweakListOptions)
+	return scheduling.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Settings() settings.Interface {
-	return settings.New(f, f.namespace, f.tweakListOptions)
+	return settings.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }
 
 func (f *sharedInformerFactory) Storage() storage.Interface {
-	return storage.New(f, f.namespace, f.tweakListOptions)
+	return storage.NewWithMultiTenancy(f, f.namespace, f.tweakListOptions, f.tenant)
 }

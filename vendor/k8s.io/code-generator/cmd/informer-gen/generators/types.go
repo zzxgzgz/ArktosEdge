@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +26,8 @@ var (
 	cacheListWatch              = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "ListWatch"}
 	cacheMetaNamespaceIndexFunc = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "MetaNamespaceIndexFunc"}
 	cacheNamespaceIndex         = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "NamespaceIndex"}
+	cacheMetaTenantIndexFunc    = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "MetaTenantIndexFunc"}
+	cacheTenantIndex            = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "TenantIndex"}
 	cacheNewGenericLister       = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "NewGenericLister"}
 	cacheNewSharedIndexInformer = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "NewSharedIndexInformer"}
 	cacheSharedIndexInformer    = types.Name{Package: "k8s.io/client-go/tools/cache", Name: "SharedIndexInformer"}
@@ -36,7 +39,9 @@ var (
 	syncMutex                   = types.Name{Package: "sync", Name: "Mutex"}
 	timeDuration                = types.Name{Package: "time", Name: "Duration"}
 	v1ListOptions               = types.Name{Package: "k8s.io/apimachinery/pkg/apis/meta/v1", Name: "ListOptions"}
+	metav1TenantAll             = types.Name{Package: "k8s.io/apimachinery/pkg/apis/meta/v1", Name: "TenantAll"}
 	metav1NamespaceAll          = types.Name{Package: "k8s.io/apimachinery/pkg/apis/meta/v1", Name: "NamespaceAll"}
 	metav1Object                = types.Name{Package: "k8s.io/apimachinery/pkg/apis/meta/v1", Name: "Object"}
 	watchInterface              = types.Name{Package: "k8s.io/apimachinery/pkg/watch", Name: "Interface"}
+	aggregatedWatchInterface    = types.Name{Package: "k8s.io/apimachinery/pkg/watch", Name: "AggregatedWatchInterface"}
 )

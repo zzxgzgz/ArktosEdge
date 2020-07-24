@@ -62,7 +62,7 @@ func NewFilteredObjectSyncInformer(client versioned.Interface, namespace string,
 				}
 				return client.ReliablesyncsV1alpha1().ObjectSyncs(namespace).List(options)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(options v1.ListOptions) watch.AggregatedWatchInterface {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}

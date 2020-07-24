@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,30 +25,28 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
-	"path/filepath"
 	"time"
 
-	"k8s.io/klog"
-	"k8s.io/utils/mount"
-	utilpath "k8s.io/utils/path"
-	utilstrings "k8s.io/utils/strings"
-
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/fuzzer"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/config"
 	"k8s.io/kubernetes/pkg/kubelet/volumemanager/cache"
 	"k8s.io/kubernetes/pkg/util/goroutinemap/exponentialbackoff"
+	"k8s.io/kubernetes/pkg/util/mount"
 	volumepkg "k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
-	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/nestedpendingoperations"
 	"k8s.io/kubernetes/pkg/volume/util/operationexecutor"
 	volumetypes "k8s.io/kubernetes/pkg/volume/util/types"
+	utilpath "k8s.io/utils/path"
+	utilstrings "k8s.io/utils/strings"
 )
 
 // Reconciler runs a periodic loop to reconcile the desired state of the world
@@ -90,7 +89,6 @@ type Reconciler interface {
 //   safely (prevents more than one operation from being triggered on the same
 //   volume)
 // mounter - mounter passed in from kubelet, passed down unmount path
-// hostutil - hostutil passed in from kubelet
 // volumePluginMgr - volume plugin manager passed from kubelet
 func NewReconciler(
 	kubeClient clientset.Interface,
@@ -103,7 +101,6 @@ func NewReconciler(
 	populatorHasAddedPods func() bool,
 	operationExecutor operationexecutor.OperationExecutor,
 	mounter mount.Interface,
-	hostutil hostutil.HostUtils,
 	volumePluginMgr *volumepkg.VolumePluginMgr,
 	kubeletPodsDir string) Reconciler {
 	return &reconciler{
@@ -117,7 +114,6 @@ func NewReconciler(
 		populatorHasAddedPods:         populatorHasAddedPods,
 		operationExecutor:             operationExecutor,
 		mounter:                       mounter,
-		hostutil:                      hostutil,
 		volumePluginMgr:               volumePluginMgr,
 		kubeletPodsDir:                kubeletPodsDir,
 		timeOfLastSync:                time.Time{},
@@ -128,6 +124,7 @@ type reconciler struct {
 	kubeClient                    clientset.Interface
 	controllerAttachDetachEnabled bool
 	loopSleepDuration             time.Duration
+	syncDuration                  time.Duration
 	waitForAttachTimeout          time.Duration
 	nodeName                      types.NodeName
 	desiredStateOfWorld           cache.DesiredStateOfWorld
@@ -135,7 +132,6 @@ type reconciler struct {
 	populatorHasAddedPods         func() bool
 	operationExecutor             operationexecutor.OperationExecutor
 	mounter                       mount.Interface
-	hostutil                      hostutil.HostUtils
 	volumePluginMgr               *volumepkg.VolumePluginMgr
 	kubeletPodsDir                string
 	timeOfLastSync                time.Time
@@ -284,7 +280,7 @@ func (rc *reconciler) reconcile() {
 				// Volume is globally mounted to device, unmount it
 				klog.V(5).Infof(attachedVolume.GenerateMsgDetailed("Starting operationExecutor.UnmountDevice", ""))
 				err := rc.operationExecutor.UnmountDevice(
-					attachedVolume.AttachedVolume, rc.actualStateOfWorld, rc.hostutil)
+					attachedVolume.AttachedVolume, rc.actualStateOfWorld, rc.mounter)
 				if err != nil &&
 					!nestedpendingoperations.IsAlreadyExists(err) &&
 					!exponentialbackoff.IsExponentialBackoff(err) {
@@ -354,10 +350,11 @@ type reconstructedVolume struct {
 	volumeSpec          *volumepkg.Spec
 	outerVolumeSpecName string
 	pod                 *v1.Pod
+	attachablePlugin    volumepkg.AttachableVolumePlugin
 	volumeGidValue      string
 	devicePath          string
+	reportedInUse       bool
 	mounter             volumepkg.Mounter
-	deviceMounter       volumepkg.DeviceMounter
 	blockVolumeMapper   volumepkg.BlockVolumeMapper
 }
 
@@ -462,20 +459,17 @@ func (rc *reconciler) reconstructVolume(volume podVolume) (*reconstructedVolume,
 	}
 
 	// Create pod object
+	uid := types.UID(volume.podName)
 	pod := &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			UID: types.UID(volume.podName),
+			UID:     uid,
+			HashKey: fuzzer.GetHashOfUUID(uid),
 		},
 	}
 	mapperPlugin, err := rc.volumePluginMgr.FindMapperPluginByName(volume.pluginName)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: remove feature gate check after no longer needed
-	if utilfeature.DefaultFeatureGate.Enabled(features.BlockVolume) && volume.volumeMode == v1.PersistentVolumeBlock && mapperPlugin == nil {
-		return nil, fmt.Errorf("could not find block volume plugin %q (spec.Name: %q) pod %q (UID: %q)", volume.pluginName, volume.volumeSpecName, volume.podName, pod.UID)
-	}
-
 	volumeSpec, err := rc.operationExecutor.ReconstructVolumeOperation(
 		volume.volumeMode,
 		plugin,
@@ -499,67 +493,49 @@ func (rc *reconciler) reconstructVolume(volume podVolume) (*reconstructedVolume,
 		uniqueVolumeName = util.GetUniqueVolumeNameFromSpecWithPod(volume.podName, plugin, volumeSpec)
 	}
 
-	var volumeMapper volumepkg.BlockVolumeMapper
-	var volumeMounter volumepkg.Mounter
-	var deviceMounter volumepkg.DeviceMounter
-	// Path to the mount or block device to check
-	var checkPath string
-
-	// TODO: remove feature gate check after no longer needed
-	if utilfeature.DefaultFeatureGate.Enabled(features.BlockVolume) && volume.volumeMode == v1.PersistentVolumeBlock {
-		var newMapperErr error
-		volumeMapper, newMapperErr = mapperPlugin.NewBlockVolumeMapper(
-			volumeSpec,
-			pod,
-			volumepkg.VolumeOptions{})
-		if newMapperErr != nil {
-			return nil, fmt.Errorf(
-				"reconstructVolume.NewBlockVolumeMapper failed for volume %q (spec.Name: %q) pod %q (UID: %q) with: %v",
-				uniqueVolumeName,
-				volumeSpec.Name(),
-				volume.podName,
-				pod.UID,
-				newMapperErr)
-		}
-		mapDir, linkName := volumeMapper.GetPodDeviceMapPath()
-		checkPath = filepath.Join(mapDir, linkName)
-	} else {
-		var err error
-		volumeMounter, err = plugin.NewMounter(
-			volumeSpec,
-			pod,
-			volumepkg.VolumeOptions{})
-		if err != nil {
-			return nil, fmt.Errorf(
-				"reconstructVolume.NewMounter failed for volume %q (spec.Name: %q) pod %q (UID: %q) with: %v",
-				uniqueVolumeName,
-				volumeSpec.Name(),
-				volume.podName,
-				pod.UID,
-				err)
-		}
-		checkPath = volumeMounter.GetPath()
-		if deviceMountablePlugin != nil {
-			deviceMounter, err = deviceMountablePlugin.NewDeviceMounter()
-			if err != nil {
-				return nil, fmt.Errorf("reconstructVolume.NewDeviceMounter failed for volume %q (spec.Name: %q) pod %q (UID: %q) with: %v",
-					uniqueVolumeName,
-					volumeSpec.Name(),
-					volume.podName,
-					pod.UID,
-					err)
-			}
-		}
+	volumeMounter, newMounterErr := plugin.NewMounter(
+		volumeSpec,
+		pod,
+		volumepkg.VolumeOptions{})
+	if newMounterErr != nil {
+		return nil, fmt.Errorf(
+			"reconstructVolume.NewMounter failed for volume %q (spec.Name: %q) pod %q (UID: %q) with: %v",
+			uniqueVolumeName,
+			volumeSpec.Name(),
+			volume.podName,
+			pod.UID,
+			newMounterErr)
 	}
 
 	// Check existence of mount point for filesystem volume or symbolic link for block volume
-	isExist, checkErr := rc.operationExecutor.CheckVolumeExistenceOperation(volumeSpec, checkPath, volumeSpec.Name(), rc.mounter, uniqueVolumeName, volume.podName, pod.UID, attachablePlugin)
+	isExist, checkErr := rc.operationExecutor.CheckVolumeExistenceOperation(volumeSpec, volumeMounter.GetPath(), volumeSpec.Name(), rc.mounter, uniqueVolumeName, volume.podName, pod.UID, attachablePlugin)
 	if checkErr != nil {
 		return nil, checkErr
 	}
 	// If mount or symlink doesn't exist, volume reconstruction should be failed
 	if !isExist {
-		return nil, fmt.Errorf("volume: %q is not mounted", uniqueVolumeName)
+		return nil, fmt.Errorf("Volume: %q is not mounted", uniqueVolumeName)
+	}
+
+	// TODO: remove feature gate check after no longer needed
+	var volumeMapper volumepkg.BlockVolumeMapper
+	if utilfeature.DefaultFeatureGate.Enabled(features.BlockVolume) && volume.volumeMode == v1.PersistentVolumeBlock {
+		var newMapperErr error
+		if mapperPlugin != nil {
+			volumeMapper, newMapperErr = mapperPlugin.NewBlockVolumeMapper(
+				volumeSpec,
+				pod,
+				volumepkg.VolumeOptions{})
+			if newMapperErr != nil {
+				return nil, fmt.Errorf(
+					"reconstructVolume.NewBlockVolumeMapper failed for volume %q (spec.Name: %q) pod %q (UID: %q) with: %v",
+					uniqueVolumeName,
+					volumeSpec.Name(),
+					volume.podName,
+					pod.UID,
+					newMapperErr)
+			}
+		}
 	}
 
 	reconstructedVolume := &reconstructedVolume{
@@ -571,7 +547,7 @@ func (rc *reconciler) reconstructVolume(volume podVolume) (*reconstructedVolume,
 		// TODO: in case pod is added back before reconciler starts to unmount, we can update this field from desired state information
 		outerVolumeSpecName: volume.volumeSpecName,
 		pod:                 pod,
-		deviceMounter:       deviceMounter,
+		attachablePlugin:    attachablePlugin,
 		volumeGidValue:      "",
 		// devicePath is updated during updateStates() by checking node status's VolumesAttached data.
 		// TODO: get device path directly from the volume mount path.
@@ -598,19 +574,25 @@ func (rc *reconciler) updateDevicePath(volumesNeedUpdate map[v1.UniqueVolumeName
 	}
 }
 
-// getDeviceMountPath returns device mount path for block volume which
-// implements BlockVolumeMapper or filesystem volume which implements
-// DeviceMounter
 func getDeviceMountPath(volume *reconstructedVolume) (string, error) {
-	if volume.blockVolumeMapper != nil {
-		// for block volume, we return its global map path
-		return volume.blockVolumeMapper.GetGlobalMapPath(volume.volumeSpec)
-	} else if volume.deviceMounter != nil {
-		// for filesystem volume, we return its device mount path if the plugin implements DeviceMounter
-		return volume.deviceMounter.GetDeviceMountPath(volume.volumeSpec)
-	} else {
-		return "", fmt.Errorf("blockVolumeMapper or deviceMounter required")
+	volumeAttacher, err := volume.attachablePlugin.NewAttacher()
+	if volumeAttacher == nil || err != nil {
+		return "", err
 	}
+	deviceMountPath, err :=
+		volumeAttacher.GetDeviceMountPath(volume.volumeSpec)
+	if err != nil {
+		return "", err
+	}
+
+	if volume.blockVolumeMapper != nil {
+		deviceMountPath, err =
+			volume.blockVolumeMapper.GetGlobalMapPath(volume.volumeSpec)
+		if err != nil {
+			return "", err
+		}
+	}
+	return deviceMountPath, nil
 }
 
 func (rc *reconciler) updateStates(volumesNeedUpdate map[v1.UniqueVolumeName]*reconstructedVolume) error {
@@ -639,8 +621,7 @@ func (rc *reconciler) updateStates(volumesNeedUpdate map[v1.UniqueVolumeName]*re
 			continue
 		}
 		klog.V(4).Infof("Volume: %s (pod UID %s) is marked as mounted and added into the actual state", volume.volumeName, volume.podName)
-		// If the volume has device to mount, we mark its device as mounted.
-		if volume.deviceMounter != nil || volume.blockVolumeMapper != nil {
+		if volume.attachablePlugin != nil {
 			deviceMountPath, err := getDeviceMountPath(volume)
 			if err != nil {
 				klog.Errorf("Could not find device mount path for volume %s", volume.volumeName)

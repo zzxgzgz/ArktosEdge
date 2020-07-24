@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -80,7 +81,7 @@ type Provider interface {
 	//
 	// GetPodByName returns the spec of the pod with the name in the specified
 	// namespace.
-	GetPodByName(namespace, name string) (*v1.Pod, bool)
+	GetPodByName(tenant, namespace, name string) (*v1.Pod, bool)
 	// GetNode returns the spec of the local node.
 	GetNode() (*v1.Node, error)
 	// GetNodeConfig returns the configuration of the local node.
@@ -129,6 +130,7 @@ func CreateHandlers(rootPath string, provider Provider, summaryProvider SummaryP
 			endpoint{"", h.handleStats},
 			endpoint{"/container", h.handleSystemContainer},
 			endpoint{"/{podName}/{containerName}", h.handlePodContainer},
+			endpoint{"/{tenant}/{namespace}/{podName}/{uid}/{containerName}", h.handlePodContainer},
 			endpoint{"/{namespace}/{podName}/{uid}/{containerName}", h.handlePodContainer},
 		)
 	}
@@ -272,6 +274,7 @@ func (h *handler) handlePodContainer(request *restful.Request, response *restful
 
 	// Default parameters.
 	params := map[string]string{
+		"tenant":    metav1.TenantSystem,
 		"namespace": metav1.NamespaceDefault,
 		"uid":       "",
 	}
@@ -285,7 +288,8 @@ func (h *handler) handlePodContainer(request *restful.Request, response *restful
 		return
 	}
 
-	pod, ok := h.provider.GetPodByName(params["namespace"], params["podName"])
+	pod, ok := h.provider.GetPodByName(params["tenant"], params["namespace"], params["podName"])
+
 	if !ok {
 		klog.V(4).Infof("Container not found: %v", params)
 		response.WriteError(http.StatusNotFound, kubecontainer.ErrContainerNotFound)

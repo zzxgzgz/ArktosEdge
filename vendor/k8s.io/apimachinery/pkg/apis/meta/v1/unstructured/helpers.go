@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,15 +28,11 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
-	"k8s.io/klog"
 )
 
 // NestedFieldCopy returns a deep copy of the value of a nested field.
 // Returns false if the value is missing.
 // No error is returned for a nil field.
-//
-// Note: fields passed to this function are treated as keys within the passed
-// object; no array/slice syntax is supported.
 func NestedFieldCopy(obj map[string]interface{}, fields ...string) (interface{}, bool, error) {
 	val, found, err := NestedFieldNoCopy(obj, fields...)
 	if !found || err != nil {
@@ -47,9 +44,6 @@ func NestedFieldCopy(obj map[string]interface{}, fields ...string) (interface{},
 // NestedFieldNoCopy returns a reference to a nested field.
 // Returns false if value is not found and an error if unable
 // to traverse obj.
-//
-// Note: fields passed to this function are treated as keys within the passed
-// object; no array/slice syntax is supported.
 func NestedFieldNoCopy(obj map[string]interface{}, fields ...string) (interface{}, bool, error) {
 	var val interface{} = obj
 
@@ -318,6 +312,7 @@ func extractOwnerReference(v map[string]interface{}) metav1.OwnerReference {
 		Name:               getNestedString(v, "name"),
 		APIVersion:         getNestedString(v, "apiVersion"),
 		UID:                types.UID(getNestedString(v, "uid")),
+		HashKey:            getNestedInt64(v, "hashKey"),
 		Controller:         controllerPtr,
 		BlockOwnerDeletion: blockOwnerDeletionPtr,
 	}
@@ -329,8 +324,6 @@ func extractOwnerReference(v map[string]interface{}) metav1.OwnerReference {
 var UnstructuredJSONScheme runtime.Codec = unstructuredJSONScheme{}
 
 type unstructuredJSONScheme struct{}
-
-const unstructuredJSONSchemeIdentifier runtime.Identifier = "unstructuredJSON"
 
 func (s unstructuredJSONScheme) Decode(data []byte, _ *schema.GroupVersionKind, obj runtime.Object) (runtime.Object, *schema.GroupVersionKind, error) {
 	var err error
@@ -352,14 +345,7 @@ func (s unstructuredJSONScheme) Decode(data []byte, _ *schema.GroupVersionKind, 
 	return obj, &gvk, nil
 }
 
-func (s unstructuredJSONScheme) Encode(obj runtime.Object, w io.Writer) error {
-	if co, ok := obj.(runtime.CacheableObject); ok {
-		return co.CacheEncode(s.Identifier(), s.doEncode, w)
-	}
-	return s.doEncode(obj, w)
-}
-
-func (unstructuredJSONScheme) doEncode(obj runtime.Object, w io.Writer) error {
+func (unstructuredJSONScheme) Encode(obj runtime.Object, w io.Writer) error {
 	switch t := obj.(type) {
 	case *Unstructured:
 		return json.NewEncoder(w).Encode(t.Object)
@@ -381,11 +367,6 @@ func (unstructuredJSONScheme) doEncode(obj runtime.Object, w io.Writer) error {
 	default:
 		return json.NewEncoder(w).Encode(t)
 	}
-}
-
-// Identifier implements runtime.Encoder interface.
-func (unstructuredJSONScheme) Identifier() runtime.Identifier {
-	return unstructuredJSONSchemeIdentifier
 }
 
 func (s unstructuredJSONScheme) decode(data []byte) (runtime.Object, error) {
@@ -415,6 +396,12 @@ func (s unstructuredJSONScheme) decodeInto(data []byte, obj runtime.Object) erro
 		return s.decodeToUnstructured(data, x)
 	case *UnstructuredList:
 		return s.decodeToList(data, x)
+	case *runtime.VersionedObjects:
+		o, err := s.decode(data)
+		if err == nil {
+			x.Objects = []runtime.Object{o}
+		}
+		return err
 	default:
 		return json.Unmarshal(data, x)
 	}
@@ -469,30 +456,12 @@ func (s unstructuredJSONScheme) decodeToList(data []byte, list *UnstructuredList
 	return nil
 }
 
-type jsonFallbackEncoder struct {
-	encoder    runtime.Encoder
-	identifier runtime.Identifier
+type JSONFallbackEncoder struct {
+	runtime.Encoder
 }
 
-func NewJSONFallbackEncoder(encoder runtime.Encoder) runtime.Encoder {
-	result := map[string]string{
-		"name": "fallback",
-		"base": string(encoder.Identifier()),
-	}
-	identifier, err := gojson.Marshal(result)
-	if err != nil {
-		klog.Fatalf("Failed marshaling identifier for jsonFallbackEncoder: %v", err)
-	}
-	return &jsonFallbackEncoder{
-		encoder:    encoder,
-		identifier: runtime.Identifier(identifier),
-	}
-}
-
-func (c *jsonFallbackEncoder) Encode(obj runtime.Object, w io.Writer) error {
-	// There is no need to handle runtime.CacheableObject, as we only
-	// fallback to other encoders here.
-	err := c.encoder.Encode(obj, w)
+func (c JSONFallbackEncoder) Encode(obj runtime.Object, w io.Writer) error {
+	err := c.Encoder.Encode(obj, w)
 	if runtime.IsNotRegisteredError(err) {
 		switch obj.(type) {
 		case *Unstructured, *UnstructuredList:
@@ -500,9 +469,4 @@ func (c *jsonFallbackEncoder) Encode(obj runtime.Object, w io.Writer) error {
 		}
 	}
 	return err
-}
-
-// Identifier implements runtime.Encoder interface.
-func (c *jsonFallbackEncoder) Identifier() runtime.Identifier {
-	return c.identifier
 }

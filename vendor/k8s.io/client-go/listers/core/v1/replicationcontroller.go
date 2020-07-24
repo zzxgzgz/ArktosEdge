@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type ReplicationControllerLister interface {
 	List(selector labels.Selector) (ret []*v1.ReplicationController, err error)
 	// ReplicationControllers returns an object that can list and get ReplicationControllers.
 	ReplicationControllers(namespace string) ReplicationControllerNamespaceLister
+	ReplicationControllersWithMultiTenancy(namespace string, tenant string) ReplicationControllerNamespaceLister
 	ReplicationControllerListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *replicationControllerLister) List(selector labels.Selector) (ret []*v1.
 
 // ReplicationControllers returns an object that can list and get ReplicationControllers.
 func (s *replicationControllerLister) ReplicationControllers(namespace string) ReplicationControllerNamespaceLister {
-	return replicationControllerNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return replicationControllerNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *replicationControllerLister) ReplicationControllersWithMultiTenancy(namespace string, tenant string) ReplicationControllerNamespaceLister {
+	return replicationControllerNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // ReplicationControllerNamespaceLister helps list and get ReplicationControllers.
 type ReplicationControllerNamespaceLister interface {
-	// List lists all ReplicationControllers in the indexer for a given namespace.
+	// List lists all ReplicationControllers in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.ReplicationController, err error)
-	// Get retrieves the ReplicationController from the indexer for a given namespace and name.
+	// Get retrieves the ReplicationController from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.ReplicationController, error)
 	ReplicationControllerNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type ReplicationControllerNamespaceLister interface {
 type replicationControllerNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all ReplicationControllers in the indexer for a given namespace.
 func (s replicationControllerNamespaceLister) List(selector labels.Selector) (ret []*v1.ReplicationController, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.ReplicationController))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s replicationControllerNamespaceLister) List(selector labels.Selector) (re
 
 // Get retrieves the ReplicationController from the indexer for a given namespace and name.
 func (s replicationControllerNamespaceLister) Get(name string) (*v1.ReplicationController, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

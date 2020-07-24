@@ -1,5 +1,6 @@
 /*
 Copyright 2019 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,7 +49,8 @@ func (e *events) CreateWithEventNamespace(event *v1beta1.Event) (*v1beta1.Event,
 	}
 	result := &v1beta1.Event{}
 	err := e.client.Post().
-		NamespaceIfScoped(event.Namespace, len(event.Namespace) > 0).
+		TenantIfScoped(event.GetTenant(), len(event.GetTenant()) > 0).
+		NamespaceIfScoped(event.GetNamespace(), len(event.GetNamespace()) > 0).
 		Resource("events").
 		Body(event).
 		Do().
@@ -63,12 +65,16 @@ func (e *events) CreateWithEventNamespace(event *v1beta1.Event) (*v1beta1.Event,
 // created with the "" namespace.
 // Update also requires the ResourceVersion to be set in the event object.
 func (e *events) UpdateWithEventNamespace(event *v1beta1.Event) (*v1beta1.Event, error) {
+	if e.te != "" && event.Tenant != e.te {
+		return nil, fmt.Errorf("can't update an event with tenant '%v' in tenant '%v'", event.Tenant, e.te)
+	}
 	if e.ns != "" && event.Namespace != e.ns {
 		return nil, fmt.Errorf("can't update an event with namespace '%v' in namespace '%v'", event.Namespace, e.ns)
 	}
 	result := &v1beta1.Event{}
 	err := e.client.Put().
-		NamespaceIfScoped(event.Namespace, len(event.Namespace) > 0).
+		TenantIfScoped(event.GetTenant(), len(event.GetTenant()) > 0).
+		NamespaceIfScoped(event.GetNamespace(), len(event.GetNamespace()) > 0).
 		Resource("events").
 		Name(event.Name).
 		Body(event).
@@ -83,12 +89,16 @@ func (e *events) UpdateWithEventNamespace(event *v1beta1.Event) (*v1beta1.Event,
 // The namespace must either match this event client's namespace, or this event client must
 //  have been created with the "" namespace.
 func (e *events) PatchWithEventNamespace(event *v1beta1.Event, data []byte) (*v1beta1.Event, error) {
+	if e.te != "" && event.Tenant != e.te {
+		return nil, fmt.Errorf("can't patch an event with tenant '%v' in tenant '%v'", event.Tenant, e.te)
+	}
 	if e.ns != "" && event.Namespace != e.ns {
 		return nil, fmt.Errorf("can't patch an event with namespace '%v' in namespace '%v'", event.Namespace, e.ns)
 	}
 	result := &v1beta1.Event{}
 	err := e.client.Patch(types.StrategicMergePatchType).
-		NamespaceIfScoped(event.Namespace, len(event.Namespace) > 0).
+		TenantIfScoped(event.GetTenant(), len(event.GetTenant()) > 0).
+		NamespaceIfScoped(event.GetNamespace(), len(event.GetNamespace()) > 0).
 		Resource("events").
 		Name(event.Name).
 		Body(data).

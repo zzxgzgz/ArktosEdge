@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -48,17 +49,17 @@ func (_m *MockManager) CreateMirrorPod(_a0 *v1.Pod) error {
 }
 
 // DeleteMirrorPod provides a mock function with given fields: podFullName
-func (_m *MockManager) DeleteMirrorPod(podFullName string, _ *types.UID) (bool, error) {
+func (_m *MockManager) DeleteMirrorPod(podFullName string) error {
 	ret := _m.Called(podFullName)
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string) error); ok {
-		return true, rf(podFullName)
+		r0 = rf(podFullName)
 	} else {
 		r0 = ret.Error(0)
 	}
 
-	return false, r0
+	return r0
 }
 
 // DeleteOrphanedMirrorPods provides a mock function with given fields:
@@ -141,12 +142,12 @@ func (_m *MockManager) GetPodByMirrorPod(_a0 *v1.Pod) (*v1.Pod, bool) {
 }
 
 // GetPodByName provides a mock function with given fields: namespace, name
-func (_m *MockManager) GetPodByName(namespace string, name string) (*v1.Pod, bool) {
-	ret := _m.Called(namespace, name)
+func (_m *MockManager) GetPodByName(tenant, namespace string, name string) (*v1.Pod, bool) {
+	ret := _m.Called(tenant, namespace, name)
 
 	var r0 *v1.Pod
-	if rf, ok := ret.Get(0).(func(string, string) *v1.Pod); ok {
-		r0 = rf(namespace, name)
+	if rf, ok := ret.Get(0).(func(string, string, string) *v1.Pod); ok {
+		r0 = rf(tenant, namespace, name)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*v1.Pod)
@@ -154,8 +155,8 @@ func (_m *MockManager) GetPodByName(namespace string, name string) (*v1.Pod, boo
 	}
 
 	var r1 bool
-	if rf, ok := ret.Get(1).(func(string, string) bool); ok {
-		r1 = rf(namespace, name)
+	if rf, ok := ret.Get(1).(func(string, string, string) bool); ok {
+		r1 = rf(tenant, namespace, name)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}

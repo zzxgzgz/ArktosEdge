@@ -181,9 +181,10 @@ func NewKubeClient(kubeConfigPath string) *kubernetes.Clientset {
 		Fatalf("Get kube config failed with error: %v", err)
 		return nil
 	}
-	kubeConfig.QPS = 5
-	kubeConfig.Burst = 10
-	kubeConfig.ContentType = "application/vnd.kubernetes.protobuf"
+	kConfig := kubeConfig.GetConfig()
+	kConfig.QPS = 5
+	kConfig.Burst = 10
+	kConfig.ContentType = "application/vnd.kubernetes.protobuf"
 	kubeClient, err := kubernetes.NewForConfig(kubeConfig)
 	if err != nil {
 		Fatalf("Get kube client failed with error: %v", err)
@@ -215,7 +216,7 @@ func WaitforPodsRunning(kubeConfigPath string, podlist v1.PodList, timout time.D
 	signal := make(chan struct{})
 	// define list watcher
 	listWatcher := cache.NewListWatchFromClient(
-		kubeClient.CoreV1().RESTClient(),
+		kubeClient.CoreV1(),
 		"pods",
 		v1.NamespaceAll,
 		fields.Everything())

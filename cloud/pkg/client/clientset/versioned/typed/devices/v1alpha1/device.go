@@ -43,7 +43,7 @@ type DeviceInterface interface {
 	DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error
 	Get(name string, options v1.GetOptions) (*v1alpha1.Device, error)
 	List(opts v1.ListOptions) (*v1alpha1.DeviceList, error)
-	Watch(opts v1.ListOptions) (watch.Interface, error)
+	Watch(opts v1.ListOptions) watch.AggregatedWatchInterface
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.Device, err error)
 	DeviceExpansion
 }
@@ -93,18 +93,20 @@ func (c *devices) List(opts v1.ListOptions) (result *v1alpha1.DeviceList, err er
 }
 
 // Watch returns a watch.Interface that watches the requested devices.
-func (c *devices) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *devices) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
 	var timeout time.Duration
 	if opts.TimeoutSeconds != nil {
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	opts.Watch = true
-	return c.client.Get().
+	oneWatch, err := c.client.Get().
 		Namespace(c.ns).
 		Resource("devices").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
 		Watch()
+	awi := watch.NewAggregatedWatcherWithOneWatch(oneWatch, err)
+	return awi
 }
 
 // Create takes the representation of a device and creates it.  Returns the server's representation of the device, and an error, if there is any.

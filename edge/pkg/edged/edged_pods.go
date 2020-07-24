@@ -69,6 +69,7 @@ import (
 	utilfile "k8s.io/utils/path"
 
 	edgedconfig "github.com/kubeedge/kubeedge/edge/pkg/edged/config"
+	"k8s.io/component-base/featuregate"
 )
 
 const (
@@ -563,7 +564,7 @@ func (e *edged) GetPodCgroupParent(pod *v1.Pod) string {
 
 // GenerateRunContainerOptions generates the RunContainerOptions, which can be used by
 // the container runtime to set parameters for launching a container.
-func (e *edged) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Container, podIP string, podIPs []string) (*kubecontainer.RunContainerOptions, func(), error) {
+func (e *edged) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Container, podIP string) (*kubecontainer.RunContainerOptions, func(), error) {
 	/*opts, err := e.GenerateContainerOptions(pod)
 	if err != nil {
 		return nil, nil, err
@@ -588,7 +589,7 @@ func (e *edged) GenerateRunContainerOptions(pod *v1.Pod, container *v1.Container
 		}
 		opts.Devices = append(opts.Devices, blkVolumes...)
 	}
-
+	podIPs := []string{"123.456.78.90"}
 	envs, err := e.makeEnvironmentVariables(pod, container, podIP, podIPs)
 	if err != nil {
 		return nil, nil, err
@@ -768,16 +769,16 @@ func (e *edged) convertStatusToAPIStatus(pod *v1.Pod, podStatus *kubecontainer.P
 	} else {
 		apiPodStatus.HostIP = hostIP
 
-		apiPodStatus.PodIPs = make([]v1.PodIP, 0, len(podStatus.IPs))
-		for _, ip := range podStatus.IPs {
-			apiPodStatus.PodIPs = append(apiPodStatus.PodIPs, v1.PodIP{
-				IP: ip,
-			})
-		}
+		// apiPodStatus.PodIPs = make([]v1.PodIP, 0, len(podStatus.IPs))
+		// for _, ip := range podStatus.IPs {
+		// 	apiPodStatus.PodIPs = append(apiPodStatus.PodIPs, v1.PodIP{
+		// 		IP: ip,
+		// 	})
+		// }
 
-		if len(apiPodStatus.PodIPs) > 0 {
-			apiPodStatus.PodIP = apiPodStatus.PodIPs[0].IP
-		}
+		// if len(apiPodStatus.PodIPs) > 0 {
+		// 	apiPodStatus.PodIP = apiPodStatus.PodIPs[0].IP
+		// }
 
 		if pod.Spec.HostNetwork && apiPodStatus.PodIP == "" {
 			apiPodStatus.PodIP = hostIP
@@ -945,7 +946,8 @@ func (e *edged) updatePodStatus(pod *v1.Pod) error {
 	var podStatusRemote *kubecontainer.PodStatus
 	var err error
 	if e.containerRuntime != nil {
-		podStatusRemote, err = e.containerRuntime.GetPodStatus(pod.UID, pod.Name, pod.Namespace)
+		tenantName := "tenant"
+		podStatusRemote, err = e.containerRuntime.GetPodStatus(pod.UID, pod.Name, pod.Namespace, tenantName)
 		if err != nil {
 			containerStatus := &kubecontainer.ContainerStatus{}
 			kubeStatus := toKubeContainerStatus(v1.PodUnknown, containerStatus)
@@ -981,7 +983,8 @@ func (e *edged) updatePodStatus(pod *v1.Pod) error {
 	if e.containerRuntime != nil {
 		spec := &pod.Spec
 		newStatus.Conditions = append(newStatus.Conditions, status.GeneratePodInitializedCondition(spec, newStatus.InitContainerStatuses, newStatus.Phase))
-		newStatus.Conditions = append(newStatus.Conditions, status.GeneratePodReadyCondition(spec, newStatus.Conditions, newStatus.ContainerStatuses, newStatus.Phase))
+		var vmStatus *v1.VirtualMachineStatus = nil
+		newStatus.Conditions = append(newStatus.Conditions, status.GeneratePodReadyCondition(spec, newStatus.Conditions, newStatus.ContainerStatuses, vmStatus, newStatus.Phase))
 		//newStatus.Conditions = append(newStatus.Conditions, status.GenerateContainersReadyCondition(spec, newStatus.ContainerStatuses, newStatus.Phase))
 		newStatus.Conditions = append(newStatus.Conditions, v1.PodCondition{
 			Type:   v1.PodScheduled,
@@ -1193,12 +1196,12 @@ func (e *edged) GetKubeletContainerLogs(ctx context.Context, podFullName, contai
 	// Pod workers periodically write status to statusManager. If status is not
 	// cached there, something is wrong (or kubelet just restarted and hasn't
 	// caught up yet). Just assume the pod is not ready yet.
-	name, namespace, err := kubecontainer.ParsePodFullName(podFullName)
+	name, namespace, tenantName, err := kubecontainer.ParsePodFullName(podFullName)
 	if err != nil {
 		return fmt.Errorf("unable to parse pod full name %q: %v", podFullName, err)
 	}
-
-	pod, ok := e.GetPodByName(namespace, name)
+	// tenantName := "tenant"
+	pod, ok := e.GetPodByName(tenantName, namespace, name)
 	if !ok {
 		return fmt.Errorf("pod %q cannot be found - no logs available", name)
 	}
@@ -1251,7 +1254,7 @@ func (e *edged) GetAttach(podFullName string, podUID types.UID, containerName st
 	return nil, nil
 }
 
-func (e *edged) GetPortForward(podName, podNamespace string, podUID types.UID, portForwardOpts portforward.V4Options) (*url.URL, error) {
+func (e *edged) GetPortForward(podName, podNamespace string, tenant string, podUID types.UID, portForwardOpts portforward.V4Options) (*url.URL, error) {
 	return nil, nil
 }
 
@@ -1266,8 +1269,10 @@ func (e *edged) validateContainerLogStatus(podName string, podStatus *v1.PodStat
 	if !found {
 		cStatus, found = podutil.GetContainerStatus(podStatus.InitContainerStatuses, containerName)
 	}
-	if !found && utilfeature.DefaultFeatureGate.Enabled(features.EphemeralContainers) {
-		cStatus, found = podutil.GetContainerStatus(podStatus.EphemeralContainerStatuses, containerName)
+	var EphemeralContainers featuregate.Feature = "EphemeralContainers"
+	if !found && utilfeature.DefaultFeatureGate.Enabled(EphemeralContainers) {
+		var EphemeralContainerStatuses []v1.ContainerStatus = make([]v1.ContainerStatus, 0)
+		cStatus, found = podutil.GetContainerStatus(EphemeralContainerStatuses, containerName)
 	}
 	if !found {
 		return kubecontainer.ContainerID{}, fmt.Errorf("container %q in pod %q is not available", containerName, podName)

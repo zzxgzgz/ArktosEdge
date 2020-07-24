@@ -43,7 +43,7 @@ type ClusterObjectSyncInterface interface {
 	DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error
 	Get(name string, options v1.GetOptions) (*v1alpha1.ClusterObjectSync, error)
 	List(opts v1.ListOptions) (*v1alpha1.ClusterObjectSyncList, error)
-	Watch(opts v1.ListOptions) (watch.Interface, error)
+	Watch(opts v1.ListOptions) watch.AggregatedWatchInterface
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1alpha1.ClusterObjectSync, err error)
 	ClusterObjectSyncExpansion
 }
@@ -89,17 +89,19 @@ func (c *clusterObjectSyncs) List(opts v1.ListOptions) (result *v1alpha1.Cluster
 }
 
 // Watch returns a watch.Interface that watches the requested clusterObjectSyncs.
-func (c *clusterObjectSyncs) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *clusterObjectSyncs) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
 	var timeout time.Duration
 	if opts.TimeoutSeconds != nil {
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	opts.Watch = true
-	return c.client.Get().
+	oneWatch, err := c.client.Get().
 		Resource("clusterobjectsyncs").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
 		Watch()
+	awi := watch.NewAggregatedWatcherWithOneWatch(oneWatch, err)
+	return awi
 }
 
 // Create takes the representation of a clusterObjectSync and creates it.  Returns the server's representation of the clusterObjectSync, and an error, if there is any.

@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -122,9 +123,11 @@ func AsPartialObjectMetadata(m metav1.Object) *metav1.PartialObjectMetadata {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:                       m.GetName(),
 				GenerateName:               m.GetGenerateName(),
+				Tenant:                     m.GetTenant(),
 				Namespace:                  m.GetNamespace(),
 				SelfLink:                   m.GetSelfLink(),
 				UID:                        m.GetUID(),
+				HashKey:                    m.GetHashKey(),
 				ResourceVersion:            m.GetResourceVersion(),
 				Generation:                 m.GetGeneration(),
 				CreationTimestamp:          m.GetCreationTimestamp(),
@@ -135,6 +138,7 @@ func AsPartialObjectMetadata(m metav1.Object) *metav1.PartialObjectMetadata {
 				OwnerReferences:            m.GetOwnerReferences(),
 				Finalizers:                 m.GetFinalizers(),
 				ClusterName:                m.GetClusterName(),
+				Initializers:               m.GetInitializers(),
 				ManagedFields:              m.GetManagedFields(),
 			},
 		}
@@ -223,6 +227,23 @@ func (resourceAccessor) APIVersion(obj runtime.Object) (string, error) {
 
 func (resourceAccessor) SetAPIVersion(obj runtime.Object, version string) error {
 	objectAccessor{obj}.SetAPIVersion(version)
+	return nil
+}
+
+func (resourceAccessor) Tenant(obj runtime.Object) (string, error) {
+	accessor, err := Accessor(obj)
+	if err != nil {
+		return "", err
+	}
+	return accessor.GetTenant(), nil
+}
+
+func (resourceAccessor) SetTenant(obj runtime.Object, tenant string) error {
+	accessor, err := Accessor(obj)
+	if err != nil {
+		return err
+	}
+	accessor.SetTenant(tenant)
 	return nil
 }
 
@@ -444,6 +465,7 @@ func setOwnerReference(v reflect.Value, o *metav1.OwnerReference) error {
 // genericAccessor contains pointers to strings that can modify an arbitrary
 // struct and implements the Accessor interface.
 type genericAccessor struct {
+	tenant            *string
 	namespace         *string
 	name              *string
 	generateName      *string
@@ -458,6 +480,20 @@ type genericAccessor struct {
 	annotations       *map[string]string
 	ownerReferences   reflect.Value
 	finalizers        *[]string
+}
+
+func (a genericAccessor) GetTenant() string {
+	if a.tenant == nil {
+		return ""
+	}
+	return *a.tenant
+}
+
+func (a genericAccessor) SetTenant(tenant string) {
+	if a.tenant == nil {
+		return
+	}
+	*a.tenant = tenant
 }
 
 func (a genericAccessor) GetNamespace() string {

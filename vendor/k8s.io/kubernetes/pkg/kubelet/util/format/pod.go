@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -30,15 +31,15 @@ type podHandler func(*v1.Pod) string
 // Pod returns a string representing a pod in a consistent human readable format,
 // with pod UID as part of the string.
 func Pod(pod *v1.Pod) string {
-	return PodDesc(pod.Name, pod.Namespace, pod.UID)
+	return PodDesc(pod.Name, pod.Namespace, pod.Tenant, pod.UID)
 }
 
 // PodDesc returns a string representing a pod in a consistent human readable format,
 // with pod UID as part of the string.
-func PodDesc(podName, podNamespace string, podUID types.UID) string {
+func PodDesc(podName, podNamespace, podTenant string, podUID types.UID) string {
 	// Use underscore as the delimiter because it is not allowed in pod name
 	// (DNS subdomain format), while allowed in the container name format.
-	return fmt.Sprintf("%s_%s(%s)", podName, podNamespace, podUID)
+	return fmt.Sprintf("%s_%s_%s(%s)", podName, podNamespace, podTenant, podUID)
 }
 
 // PodWithDeletionTimestamp is the same as Pod. In addition, it prints the
@@ -68,5 +69,5 @@ func aggregatePods(pods []*v1.Pod, handler podHandler) string {
 	for _, pod := range pods {
 		podStrings = append(podStrings, handler(pod))
 	}
-	return strings.Join(podStrings, ", ")
+	return fmt.Sprintf(strings.Join(podStrings, ", "))
 }

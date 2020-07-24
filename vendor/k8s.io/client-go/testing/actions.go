@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -38,22 +39,53 @@ func NewRootGetAction(resource schema.GroupVersionResource, name string) GetActi
 	return action
 }
 
+func NewTenantGetAction(resource schema.GroupVersionResource, name string, tenant string) GetActionImpl {
+	action := GetActionImpl{}
+	action.Verb = "get"
+	action.Resource = resource
+	action.Name = name
+	action.Tenant = tenant
+
+	return action
+}
+
 func NewGetAction(resource schema.GroupVersionResource, namespace, name string) GetActionImpl {
+	return NewGetActionWithMultiTenancy(resource, namespace, name, metav1.TenantSystem)
+}
+
+func NewGetActionWithMultiTenancy(resource schema.GroupVersionResource, namespace, name string, tenant string) GetActionImpl {
 	action := GetActionImpl{}
 	action.Verb = "get"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Name = name
 
 	return action
 }
 
 func NewGetSubresourceAction(resource schema.GroupVersionResource, namespace, subresource, name string) GetActionImpl {
+	return NewGetSubresourceActionWithMultiTenancy(resource, namespace, subresource, name, metav1.TenantSystem)
+}
+
+func NewGetSubresourceActionWithMultiTenancy(resource schema.GroupVersionResource, namespace, subresource, name string, tenant string) GetActionImpl {
 	action := GetActionImpl{}
 	action.Verb = "get"
 	action.Resource = resource
 	action.Subresource = subresource
 	action.Namespace = namespace
+	action.Tenant = tenant
+	action.Name = name
+
+	return action
+}
+
+func NewTenantGetSubresourceAction(resource schema.GroupVersionResource, subresource, name string, tenant string) GetActionImpl {
+	action := GetActionImpl{}
+	action.Verb = "get"
+	action.Resource = resource
+	action.Subresource = subresource
+	action.Tenant = tenant
 	action.Name = name
 
 	return action
@@ -80,12 +112,29 @@ func NewRootListAction(resource schema.GroupVersionResource, kind schema.GroupVe
 	return action
 }
 
+func NewTenantListAction(resource schema.GroupVersionResource, kind schema.GroupVersionKind, opts interface{}, tenant string) ListActionImpl {
+	action := ListActionImpl{}
+	action.Verb = "list"
+	action.Resource = resource
+	action.Kind = kind
+	action.Tenant = tenant
+	labelSelector, fieldSelector, _ := ExtractFromListOptions(opts)
+	action.ListRestrictions = ListRestrictions{labelSelector, fieldSelector}
+
+	return action
+}
+
 func NewListAction(resource schema.GroupVersionResource, kind schema.GroupVersionKind, namespace string, opts interface{}) ListActionImpl {
+	return NewListActionWithMultiTenancy(resource, kind, namespace, opts, metav1.TenantSystem)
+}
+
+func NewListActionWithMultiTenancy(resource schema.GroupVersionResource, kind schema.GroupVersionKind, namespace string, opts interface{}, tenant string) ListActionImpl {
 	action := ListActionImpl{}
 	action.Verb = "list"
 	action.Resource = resource
 	action.Kind = kind
 	action.Namespace = namespace
+	action.Tenant = tenant
 	labelSelector, fieldSelector, _ := ExtractFromListOptions(opts)
 	action.ListRestrictions = ListRestrictions{labelSelector, fieldSelector}
 
@@ -101,11 +150,25 @@ func NewRootCreateAction(resource schema.GroupVersionResource, object runtime.Ob
 	return action
 }
 
+func NewTenantCreateAction(resource schema.GroupVersionResource, object runtime.Object, tenant string) CreateActionImpl {
+	action := CreateActionImpl{}
+	action.Verb = "create"
+	action.Resource = resource
+	action.Tenant = tenant
+	action.Object = object
+
+	return action
+}
 func NewCreateAction(resource schema.GroupVersionResource, namespace string, object runtime.Object) CreateActionImpl {
+	return NewCreateActionWithMultiTenancy(resource, namespace, object, metav1.TenantSystem)
+}
+
+func NewCreateActionWithMultiTenancy(resource schema.GroupVersionResource, namespace string, object runtime.Object, tenant string) CreateActionImpl {
 	action := CreateActionImpl{}
 	action.Verb = "create"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Object = object
 
 	return action
@@ -122,11 +185,28 @@ func NewRootCreateSubresourceAction(resource schema.GroupVersionResource, name, 
 	return action
 }
 
+func NewTenantCreateSubresourceAction(resource schema.GroupVersionResource, name, subresource string, object runtime.Object, tenant string) CreateActionImpl {
+	action := CreateActionImpl{}
+	action.Verb = "create"
+	action.Resource = resource
+	action.Tenant = tenant
+	action.Subresource = subresource
+	action.Name = name
+	action.Object = object
+
+	return action
+}
+
 func NewCreateSubresourceAction(resource schema.GroupVersionResource, name, subresource, namespace string, object runtime.Object) CreateActionImpl {
+	return NewCreateSubresourceActionWithMultiTenancy(resource, name, subresource, namespace, object, metav1.TenantSystem)
+}
+
+func NewCreateSubresourceActionWithMultiTenancy(resource schema.GroupVersionResource, name, subresource, namespace string, object runtime.Object, tenant string) CreateActionImpl {
 	action := CreateActionImpl{}
 	action.Verb = "create"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Subresource = subresource
 	action.Name = name
 	action.Object = object
@@ -143,11 +223,26 @@ func NewRootUpdateAction(resource schema.GroupVersionResource, object runtime.Ob
 	return action
 }
 
+func NewTenantUpdateAction(resource schema.GroupVersionResource, object runtime.Object, tenant string) UpdateActionImpl {
+	action := UpdateActionImpl{}
+	action.Verb = "update"
+	action.Resource = resource
+	action.Tenant = tenant
+	action.Object = object
+
+	return action
+}
+
 func NewUpdateAction(resource schema.GroupVersionResource, namespace string, object runtime.Object) UpdateActionImpl {
+	return NewUpdateActionWithMultiTenancy(resource, namespace, object, metav1.TenantSystem)
+}
+
+func NewUpdateActionWithMultiTenancy(resource schema.GroupVersionResource, namespace string, object runtime.Object, tenant string) UpdateActionImpl {
 	action := UpdateActionImpl{}
 	action.Verb = "update"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Object = object
 
 	return action
@@ -164,11 +259,28 @@ func NewRootPatchAction(resource schema.GroupVersionResource, name string, pt ty
 	return action
 }
 
+func NewTenantPatchAction(resource schema.GroupVersionResource, name string, pt types.PatchType, patch []byte, tenant string) PatchActionImpl {
+	action := PatchActionImpl{}
+	action.Verb = "patch"
+	action.Resource = resource
+	action.Tenant = tenant
+	action.Name = name
+	action.PatchType = pt
+	action.Patch = patch
+
+	return action
+}
+
 func NewPatchAction(resource schema.GroupVersionResource, namespace string, name string, pt types.PatchType, patch []byte) PatchActionImpl {
+	return NewPatchActionWithMultiTenancy(resource, namespace, name, pt, patch, metav1.TenantSystem)
+}
+
+func NewPatchActionWithMultiTenancy(resource schema.GroupVersionResource, namespace string, name string, pt types.PatchType, patch []byte, tenant string) PatchActionImpl {
 	action := PatchActionImpl{}
 	action.Verb = "patch"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Name = name
 	action.PatchType = pt
 	action.Patch = patch
@@ -188,12 +300,30 @@ func NewRootPatchSubresourceAction(resource schema.GroupVersionResource, name st
 	return action
 }
 
-func NewPatchSubresourceAction(resource schema.GroupVersionResource, namespace, name string, pt types.PatchType, patch []byte, subresources ...string) PatchActionImpl {
+func NewTenantPatchSubresourceAction(resource schema.GroupVersionResource, tenant string, name string, pt types.PatchType, patch []byte, subresources ...string) PatchActionImpl {
+	action := PatchActionImpl{}
+	action.Verb = "patch"
+	action.Resource = resource
+	action.Tenant = tenant
+	action.Subresource = path.Join(subresources...)
+	action.Name = name
+	action.PatchType = pt
+	action.Patch = patch
+
+	return action
+}
+
+func NewPatchSubresourceAction(resource schema.GroupVersionResource, tenant, namespace, name string, pt types.PatchType, patch []byte, subresources ...string) PatchActionImpl {
+	return NewPatchSubresourceActionWithMultiTenancy(resource, metav1.TenantSystem, namespace, name, pt, patch, subresources...)
+}
+
+func NewPatchSubresourceActionWithMultiTenancy(resource schema.GroupVersionResource, tenant, namespace, name string, pt types.PatchType, patch []byte, subresources ...string) PatchActionImpl {
 	action := PatchActionImpl{}
 	action.Verb = "patch"
 	action.Resource = resource
 	action.Subresource = path.Join(subresources...)
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Name = name
 	action.PatchType = pt
 	action.Patch = patch
@@ -210,12 +340,29 @@ func NewRootUpdateSubresourceAction(resource schema.GroupVersionResource, subres
 
 	return action
 }
+
+func NewTenantUpdateSubresourceAction(resource schema.GroupVersionResource, subresource string, object runtime.Object, tenant string) UpdateActionImpl {
+	action := UpdateActionImpl{}
+	action.Verb = "update"
+	action.Resource = resource
+	action.Subresource = subresource
+	action.Tenant = tenant
+	action.Object = object
+
+	return action
+}
+
 func NewUpdateSubresourceAction(resource schema.GroupVersionResource, subresource string, namespace string, object runtime.Object) UpdateActionImpl {
+	return NewUpdateSubresourceActionWithMultiTenancy(resource, subresource, namespace, object, metav1.TenantSystem)
+}
+
+func NewUpdateSubresourceActionWithMultiTenancy(resource schema.GroupVersionResource, subresource string, namespace string, object runtime.Object, tenant string) UpdateActionImpl {
 	action := UpdateActionImpl{}
 	action.Verb = "update"
 	action.Resource = resource
 	action.Subresource = subresource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Object = object
 
 	return action
@@ -240,22 +387,53 @@ func NewRootDeleteSubresourceAction(resource schema.GroupVersionResource, subres
 	return action
 }
 
+func NewTenantDeleteAction(resource schema.GroupVersionResource, name string, tenant string) DeleteActionImpl {
+	action := DeleteActionImpl{}
+	action.Verb = "delete"
+	action.Resource = resource
+	action.Tenant = tenant
+	action.Name = name
+
+	return action
+}
+
+func NewTenantDeleteSubresourceAction(resource schema.GroupVersionResource, subresource, name string, tenant string) DeleteActionImpl {
+	action := DeleteActionImpl{}
+	action.Verb = "delete"
+	action.Resource = resource
+	action.Subresource = subresource
+	action.Tenant = tenant
+	action.Name = name
+
+	return action
+}
+
 func NewDeleteAction(resource schema.GroupVersionResource, namespace, name string) DeleteActionImpl {
+	return NewDeleteActionWithMultiTenancy(resource, namespace, name, metav1.TenantSystem)
+}
+
+func NewDeleteActionWithMultiTenancy(resource schema.GroupVersionResource, namespace, name string, tenant string) DeleteActionImpl {
 	action := DeleteActionImpl{}
 	action.Verb = "delete"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Name = name
 
 	return action
 }
 
 func NewDeleteSubresourceAction(resource schema.GroupVersionResource, subresource, namespace, name string) DeleteActionImpl {
+	return NewDeleteSubresourceActionWithMultiTenancy(resource, subresource, namespace, name, metav1.TenantSystem)
+}
+
+func NewDeleteSubresourceActionWithMultiTenancy(resource schema.GroupVersionResource, subresource, namespace, name string, tenant string) DeleteActionImpl {
 	action := DeleteActionImpl{}
 	action.Verb = "delete"
 	action.Resource = resource
 	action.Subresource = subresource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Name = name
 
 	return action
@@ -271,11 +449,27 @@ func NewRootDeleteCollectionAction(resource schema.GroupVersionResource, opts in
 	return action
 }
 
+func NewTenantDeleteCollectionAction(resource schema.GroupVersionResource, opts interface{}, tenant string) DeleteCollectionActionImpl {
+	action := DeleteCollectionActionImpl{}
+	action.Verb = "delete-collection"
+	action.Resource = resource
+	action.Tenant = tenant
+	labelSelector, fieldSelector, _ := ExtractFromListOptions(opts)
+	action.ListRestrictions = ListRestrictions{labelSelector, fieldSelector}
+
+	return action
+}
+
 func NewDeleteCollectionAction(resource schema.GroupVersionResource, namespace string, opts interface{}) DeleteCollectionActionImpl {
+	return NewDeleteCollectionActionWithMultiTenancy(resource, namespace, opts, metav1.TenantSystem)
+}
+
+func NewDeleteCollectionActionWithMultiTenancy(resource schema.GroupVersionResource, namespace string, opts interface{}, tenant string) DeleteCollectionActionImpl {
 	action := DeleteCollectionActionImpl{}
 	action.Verb = "delete-collection"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	labelSelector, fieldSelector, _ := ExtractFromListOptions(opts)
 	action.ListRestrictions = ListRestrictions{labelSelector, fieldSelector}
 
@@ -317,11 +511,27 @@ func ExtractFromListOptions(opts interface{}) (labelSelector labels.Selector, fi
 	return labelSelector, fieldSelector, resourceVersion
 }
 
+func NewTenantWatchAction(resource schema.GroupVersionResource, opts interface{}, tenant string) WatchActionImpl {
+	action := WatchActionImpl{}
+	action.Verb = "watch"
+	action.Resource = resource
+	action.Tenant = tenant
+	labelSelector, fieldSelector, resourceVersion := ExtractFromListOptions(opts)
+	action.WatchRestrictions = WatchRestrictions{labelSelector, fieldSelector, resourceVersion}
+
+	return action
+}
+
 func NewWatchAction(resource schema.GroupVersionResource, namespace string, opts interface{}) WatchActionImpl {
+	return NewWatchActionWithMultiTenancy(resource, namespace, opts, metav1.TenantSystem)
+}
+
+func NewWatchActionWithMultiTenancy(resource schema.GroupVersionResource, namespace string, opts interface{}, tenant string) WatchActionImpl {
 	action := WatchActionImpl{}
 	action.Verb = "watch"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	labelSelector, fieldSelector, resourceVersion := ExtractFromListOptions(opts)
 	action.WatchRestrictions = WatchRestrictions{labelSelector, fieldSelector, resourceVersion}
 
@@ -329,10 +539,15 @@ func NewWatchAction(resource schema.GroupVersionResource, namespace string, opts
 }
 
 func NewProxyGetAction(resource schema.GroupVersionResource, namespace, scheme, name, port, path string, params map[string]string) ProxyGetActionImpl {
+	return NewProxyGetActionWithMultiTenancy(resource, namespace, scheme, name, port, path, params, metav1.TenantSystem)
+}
+
+func NewProxyGetActionWithMultiTenancy(resource schema.GroupVersionResource, namespace, scheme, name, port, path string, params map[string]string, tenant string) ProxyGetActionImpl {
 	action := ProxyGetActionImpl{}
 	action.Verb = "get"
 	action.Resource = resource
 	action.Namespace = namespace
+	action.Tenant = tenant
 	action.Scheme = scheme
 	action.Name = name
 	action.Port = port
@@ -352,6 +567,7 @@ type WatchRestrictions struct {
 }
 
 type Action interface {
+	GetTenant() string
 	GetNamespace() string
 	GetVerb() string
 	GetResource() schema.GroupVersionResource
@@ -420,12 +636,16 @@ type ProxyGetAction interface {
 }
 
 type ActionImpl struct {
+	Tenant      string
 	Namespace   string
 	Verb        string
 	Resource    schema.GroupVersionResource
 	Subresource string
 }
 
+func (a ActionImpl) GetTenant() string {
+	return a.Tenant
+}
 func (a ActionImpl) GetNamespace() string {
 	return a.Namespace
 }
@@ -439,8 +659,8 @@ func (a ActionImpl) GetSubresource() string {
 	return a.Subresource
 }
 func (a ActionImpl) Matches(verb, resource string) bool {
-	return strings.EqualFold(verb, a.Verb) &&
-		strings.EqualFold(resource, a.Resource.Resource)
+	return strings.ToLower(verb) == strings.ToLower(a.Verb) &&
+		strings.ToLower(resource) == strings.ToLower(a.Resource.Resource)
 }
 func (a ActionImpl) DeepCopy() Action {
 	ret := a

@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +27,7 @@ import (
 	"k8s.io/gengo/namer"
 	"k8s.io/gengo/types"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/code-generator/cmd/client-gen/generators/util"
 )
 
@@ -91,14 +93,25 @@ func (g *genFakeForGroup) GenerateType(c *generator.Context, t *types.Type, w io
 			"GroupGoName":       g.groupGoName,
 			"Version":           namer.IC(g.version),
 			"realClientPackage": strings.ToLower(filepath.Base(g.realClientPackage)),
+			"DefaultTenant":     metav1.TenantSystem,
 		}
-		if tags.NonNamespaced {
-			sw.Do(getterImplNonNamespaced, wrapper)
-			continue
+
+		switch {
+		case tags.NonNamespaced && tags.NonTenanted:
+			sw.Do(getterImplClusterScoped, wrapper)
+
+		case tags.NonNamespaced && !tags.NonTenanted:
+			sw.Do(getterImplTenantScoped, wrapper)
+
+		case !tags.NonNamespaced && !tags.NonTenanted:
+			sw.Do(getterImplNamespaceScoped, wrapper)
+
+		default:
+			return fmt.Errorf("The scope of (%s) is not supported, namespaced but not tenanted.", t.Name)
 		}
-		sw.Do(getterImplNamespaced, wrapper)
 	}
 	sw.Do(getRESTClient, m)
+	sw.Do(getRESTClients, m)
 	return sw.Error()
 }
 
@@ -108,14 +121,29 @@ type Fake$.GroupGoName$$.Version$ struct {
 }
 `
 
-var getterImplNamespaced = `
+var getterImplNamespaceScoped = `
 func (c *Fake$.GroupGoName$$.Version$) $.type|publicPlural$(namespace string) $.realClientPackage$.$.type|public$Interface {
-	return &Fake$.type|publicPlural${c, namespace}
+	return &Fake$.type|publicPlural${c, namespace, "$.DefaultTenant$"}
+}
+
+func (c *Fake$.GroupGoName$$.Version$) $.type|publicPlural$WithMultiTenancy(namespace string, tenant string) $.realClientPackage$.$.type|public$Interface {
+	return &Fake$.type|publicPlural${c, namespace, tenant}
 }
 `
 
-var getterImplNonNamespaced = `
+var getterImplTenantScoped = `
 func (c *Fake$.GroupGoName$$.Version$) $.type|publicPlural$() $.realClientPackage$.$.type|public$Interface {
+	return &Fake$.type|publicPlural${c, "$.DefaultTenant$"}
+}
+
+func (c *Fake$.GroupGoName$$.Version$) $.type|publicPlural$WithMultiTenancy(tenant string) $.realClientPackage$.$.type|public$Interface {
+	return &Fake$.type|publicPlural${c, tenant}
+}
+`
+
+var getterImplClusterScoped = `
+func (c *Fake$.GroupGoName$$.Version$) $.type|publicPlural$() $.realClientPackage$.$.type|public$Interface {
+
 	return &Fake$.type|publicPlural${c}
 }
 `
@@ -126,5 +154,14 @@ var getRESTClient = `
 func (c *Fake$.GroupGoName$$.Version$) RESTClient() $.RESTClientInterface|raw$ {
 	var ret *$.RESTClient|raw$
 	return ret
+}
+`
+
+var getRESTClients = `
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *Fake$.GroupGoName$$.Version$) RESTClients() []$.RESTClientInterface|raw$ {
+	var ret *$.RESTClient|raw$
+	return []rest.Interface{ret}
 }
 `

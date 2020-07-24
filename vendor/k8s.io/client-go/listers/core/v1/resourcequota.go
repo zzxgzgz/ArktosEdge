@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type ResourceQuotaLister interface {
 	List(selector labels.Selector) (ret []*v1.ResourceQuota, err error)
 	// ResourceQuotas returns an object that can list and get ResourceQuotas.
 	ResourceQuotas(namespace string) ResourceQuotaNamespaceLister
+	ResourceQuotasWithMultiTenancy(namespace string, tenant string) ResourceQuotaNamespaceLister
 	ResourceQuotaListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *resourceQuotaLister) List(selector labels.Selector) (ret []*v1.Resource
 
 // ResourceQuotas returns an object that can list and get ResourceQuotas.
 func (s *resourceQuotaLister) ResourceQuotas(namespace string) ResourceQuotaNamespaceLister {
-	return resourceQuotaNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return resourceQuotaNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *resourceQuotaLister) ResourceQuotasWithMultiTenancy(namespace string, tenant string) ResourceQuotaNamespaceLister {
+	return resourceQuotaNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // ResourceQuotaNamespaceLister helps list and get ResourceQuotas.
 type ResourceQuotaNamespaceLister interface {
-	// List lists all ResourceQuotas in the indexer for a given namespace.
+	// List lists all ResourceQuotas in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.ResourceQuota, err error)
-	// Get retrieves the ResourceQuota from the indexer for a given namespace and name.
+	// Get retrieves the ResourceQuota from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.ResourceQuota, error)
 	ResourceQuotaNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type ResourceQuotaNamespaceLister interface {
 type resourceQuotaNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all ResourceQuotas in the indexer for a given namespace.
 func (s resourceQuotaNamespaceLister) List(selector labels.Selector) (ret []*v1.ResourceQuota, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.ResourceQuota))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s resourceQuotaNamespaceLister) List(selector labels.Selector) (ret []*v1.
 
 // Get retrieves the ResourceQuota from the indexer for a given namespace and name.
 func (s resourceQuotaNamespaceLister) Get(name string) (*v1.ResourceQuota, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

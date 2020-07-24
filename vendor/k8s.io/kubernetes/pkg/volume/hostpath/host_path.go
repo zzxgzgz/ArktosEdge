@@ -21,15 +21,13 @@ import (
 	"os"
 	"regexp"
 
-	"k8s.io/utils/mount"
-
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
-	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/recyclerclient"
 	"k8s.io/kubernetes/pkg/volume/validation"
 )
@@ -85,6 +83,10 @@ func (plugin *hostPathPlugin) CanSupport(spec *volume.Spec) bool {
 		(spec.Volume != nil && spec.Volume.HostPath != nil)
 }
 
+func (plugin *hostPathPlugin) IsMigratedToCSI() bool {
+	return false
+}
+
 func (plugin *hostPathPlugin) RequiresRemount() bool {
 	return false
 }
@@ -116,15 +118,10 @@ func (plugin *hostPathPlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, opts vo
 	} else {
 		pathType = hostPathVolumeSource.Type
 	}
-	kvh, ok := plugin.host.(volume.KubeletVolumeHost)
-	if !ok {
-		return nil, fmt.Errorf("plugin volume host does not implement KubeletVolumeHost interface")
-	}
 	return &hostPathMounter{
 		hostPath: &hostPath{path: path, pathType: pathType},
 		readOnly: readOnly,
 		mounter:  plugin.host.GetMounter(plugin.GetPluginName()),
-		hu:       kvh.GetHostUtil(),
 	}, nil
 }
 
@@ -186,7 +183,7 @@ func newDeleter(spec *volume.Spec, host volume.VolumeHost) (volume.Deleter, erro
 }
 
 func newProvisioner(options volume.VolumeOptions, host volume.VolumeHost, plugin *hostPathPlugin) (volume.Provisioner, error) {
-	return &hostPathProvisioner{options: options, host: host, plugin: plugin, basePath: "hostpath_pv"}, nil
+	return &hostPathProvisioner{options: options, host: host, plugin: plugin}, nil
 }
 
 // HostPath volumes represent a bare host file or directory mount.
@@ -205,7 +202,6 @@ type hostPathMounter struct {
 	*hostPath
 	readOnly bool
 	mounter  mount.Interface
-	hu       hostutil.HostUtils
 }
 
 var _ volume.Mounter = &hostPathMounter{}
@@ -235,7 +231,7 @@ func (b *hostPathMounter) SetUp(mounterArgs volume.MounterArgs) error {
 	if *b.pathType == v1.HostPathUnset {
 		return nil
 	}
-	return checkType(b.GetPath(), b.pathType, b.hu)
+	return checkType(b.GetPath(), b.pathType, b.mounter)
 }
 
 // SetUpAt does not make sense for host paths - probably programmer error.
@@ -266,20 +262,19 @@ func (c *hostPathUnmounter) TearDownAt(dir string) error {
 // hostPathProvisioner implements a Provisioner for the HostPath plugin
 // This implementation is meant for testing only and only works in a single node cluster.
 type hostPathProvisioner struct {
-	host     volume.VolumeHost
-	options  volume.VolumeOptions
-	plugin   *hostPathPlugin
-	basePath string
+	host    volume.VolumeHost
+	options volume.VolumeOptions
+	plugin  *hostPathPlugin
 }
 
-// Create for hostPath simply creates a local /tmp/%/%s directory as a new PersistentVolume, default /tmp/hostpath_pv/%s.
+// Create for hostPath simply creates a local /tmp/hostpath_pv/%s directory as a new PersistentVolume.
 // This Provisioner is meant for development and testing only and WILL NOT WORK in a multi-node cluster.
 func (r *hostPathProvisioner) Provision(selectedNode *v1.Node, allowedTopologies []v1.TopologySelectorTerm) (*v1.PersistentVolume, error) {
 	if util.CheckPersistentVolumeClaimModeBlock(r.options.PVC) {
 		return nil, fmt.Errorf("%s does not support block volume provisioning", r.plugin.GetPluginName())
 	}
 
-	fullpath := fmt.Sprintf("/tmp/%s/%s", r.basePath, uuid.NewUUID())
+	fullpath := fmt.Sprintf("/tmp/hostpath_pv/%s", uuid.NewUUID())
 
 	capacity := r.options.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
 	pv := &v1.PersistentVolume{
@@ -357,13 +352,13 @@ type hostPathTypeChecker interface {
 }
 
 type fileTypeChecker struct {
-	path   string
-	exists bool
-	hu     hostutil.HostUtils
+	path    string
+	exists  bool
+	mounter mount.Interface
 }
 
 func (ftc *fileTypeChecker) Exists() bool {
-	exists, err := ftc.hu.PathExists(ftc.path)
+	exists, err := ftc.mounter.ExistsPath(ftc.path)
 	return exists && err == nil
 }
 
@@ -375,14 +370,14 @@ func (ftc *fileTypeChecker) IsFile() bool {
 }
 
 func (ftc *fileTypeChecker) MakeFile() error {
-	return makeFile(ftc.path)
+	return ftc.mounter.MakeFile(ftc.path)
 }
 
 func (ftc *fileTypeChecker) IsDir() bool {
 	if !ftc.Exists() {
 		return false
 	}
-	pathType, err := ftc.hu.GetFileType(ftc.path)
+	pathType, err := ftc.mounter.GetFileType(ftc.path)
 	if err != nil {
 		return false
 	}
@@ -390,11 +385,11 @@ func (ftc *fileTypeChecker) IsDir() bool {
 }
 
 func (ftc *fileTypeChecker) MakeDir() error {
-	return makeDir(ftc.path)
+	return ftc.mounter.MakeDir(ftc.path)
 }
 
 func (ftc *fileTypeChecker) IsBlock() bool {
-	blkDevType, err := ftc.hu.GetFileType(ftc.path)
+	blkDevType, err := ftc.mounter.GetFileType(ftc.path)
 	if err != nil {
 		return false
 	}
@@ -402,7 +397,7 @@ func (ftc *fileTypeChecker) IsBlock() bool {
 }
 
 func (ftc *fileTypeChecker) IsChar() bool {
-	charDevType, err := ftc.hu.GetFileType(ftc.path)
+	charDevType, err := ftc.mounter.GetFileType(ftc.path)
 	if err != nil {
 		return false
 	}
@@ -410,7 +405,7 @@ func (ftc *fileTypeChecker) IsChar() bool {
 }
 
 func (ftc *fileTypeChecker) IsSocket() bool {
-	socketType, err := ftc.hu.GetFileType(ftc.path)
+	socketType, err := ftc.mounter.GetFileType(ftc.path)
 	if err != nil {
 		return false
 	}
@@ -421,13 +416,13 @@ func (ftc *fileTypeChecker) GetPath() string {
 	return ftc.path
 }
 
-func newFileTypeChecker(path string, hu hostutil.HostUtils) hostPathTypeChecker {
-	return &fileTypeChecker{path: path, hu: hu}
+func newFileTypeChecker(path string, mounter mount.Interface) hostPathTypeChecker {
+	return &fileTypeChecker{path: path, mounter: mounter}
 }
 
 // checkType checks whether the given path is the exact pathType
-func checkType(path string, pathType *v1.HostPathType, hu hostutil.HostUtils) error {
-	return checkTypeInternal(newFileTypeChecker(path, hu), pathType)
+func checkType(path string, pathType *v1.HostPathType, mounter mount.Interface) error {
+	return checkTypeInternal(newFileTypeChecker(path, mounter), pathType)
 }
 
 func checkTypeInternal(ftc hostPathTypeChecker, pathType *v1.HostPathType) error {
@@ -466,33 +461,5 @@ func checkTypeInternal(ftc hostPathTypeChecker, pathType *v1.HostPathType) error
 		return fmt.Errorf("%s is an invalid volume type", *pathType)
 	}
 
-	return nil
-}
-
-// makeDir creates a new directory.
-// If pathname already exists as a directory, no error is returned.
-// If pathname already exists as a file, an error is returned.
-func makeDir(pathname string) error {
-	err := os.MkdirAll(pathname, os.FileMode(0755))
-	if err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
-// makeFile creates an empty file.
-// If pathname already exists, whether a file or directory, no error is returned.
-func makeFile(pathname string) error {
-	f, err := os.OpenFile(pathname, os.O_CREATE, os.FileMode(0644))
-	if f != nil {
-		f.Close()
-	}
-	if err != nil {
-		if !os.IsExist(err) {
-			return err
-		}
-	}
 	return nil
 }

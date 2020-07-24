@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ type HorizontalPodAutoscalerLister interface {
 	List(selector labels.Selector) (ret []*v1.HorizontalPodAutoscaler, err error)
 	// HorizontalPodAutoscalers returns an object that can list and get HorizontalPodAutoscalers.
 	HorizontalPodAutoscalers(namespace string) HorizontalPodAutoscalerNamespaceLister
+	HorizontalPodAutoscalersWithMultiTenancy(namespace string, tenant string) HorizontalPodAutoscalerNamespaceLister
 	HorizontalPodAutoscalerListerExpansion
 }
 
@@ -54,14 +56,18 @@ func (s *horizontalPodAutoscalerLister) List(selector labels.Selector) (ret []*v
 
 // HorizontalPodAutoscalers returns an object that can list and get HorizontalPodAutoscalers.
 func (s *horizontalPodAutoscalerLister) HorizontalPodAutoscalers(namespace string) HorizontalPodAutoscalerNamespaceLister {
-	return horizontalPodAutoscalerNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return horizontalPodAutoscalerNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: "system"}
+}
+
+func (s *horizontalPodAutoscalerLister) HorizontalPodAutoscalersWithMultiTenancy(namespace string, tenant string) HorizontalPodAutoscalerNamespaceLister {
+	return horizontalPodAutoscalerNamespaceLister{indexer: s.indexer, namespace: namespace, tenant: tenant}
 }
 
 // HorizontalPodAutoscalerNamespaceLister helps list and get HorizontalPodAutoscalers.
 type HorizontalPodAutoscalerNamespaceLister interface {
-	// List lists all HorizontalPodAutoscalers in the indexer for a given namespace.
+	// List lists all HorizontalPodAutoscalers in the indexer for a given tenant/namespace.
 	List(selector labels.Selector) (ret []*v1.HorizontalPodAutoscaler, err error)
-	// Get retrieves the HorizontalPodAutoscaler from the indexer for a given namespace and name.
+	// Get retrieves the HorizontalPodAutoscaler from the indexer for a given tenant/namespace and name.
 	Get(name string) (*v1.HorizontalPodAutoscaler, error)
 	HorizontalPodAutoscalerNamespaceListerExpansion
 }
@@ -71,11 +77,12 @@ type HorizontalPodAutoscalerNamespaceLister interface {
 type horizontalPodAutoscalerNamespaceLister struct {
 	indexer   cache.Indexer
 	namespace string
+	tenant    string
 }
 
 // List lists all HorizontalPodAutoscalers in the indexer for a given namespace.
 func (s horizontalPodAutoscalerNamespaceLister) List(selector labels.Selector) (ret []*v1.HorizontalPodAutoscaler, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
+	err = cache.ListAllByNamespace(s.indexer, s.tenant, s.namespace, selector, func(m interface{}) {
 		ret = append(ret, m.(*v1.HorizontalPodAutoscaler))
 	})
 	return ret, err
@@ -83,7 +90,11 @@ func (s horizontalPodAutoscalerNamespaceLister) List(selector labels.Selector) (
 
 // Get retrieves the HorizontalPodAutoscaler from the indexer for a given namespace and name.
 func (s horizontalPodAutoscalerNamespaceLister) Get(name string) (*v1.HorizontalPodAutoscaler, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
+	key := s.tenant + "/" + s.namespace + "/" + name
+	if s.tenant == "system" {
+		key = s.namespace + "/" + name
+	}
+	obj, exists, err := s.indexer.GetByKey(key)
 	if err != nil {
 		return nil, err
 	}

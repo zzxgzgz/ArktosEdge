@@ -1,5 +1,6 @@
 /*
 Copyright 2017 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -49,6 +50,7 @@ type QOSContainerManager interface {
 
 type qosContainerManagerImpl struct {
 	sync.Mutex
+	nodeInfo           *v1.Node
 	qosContainersInfo  QOSContainersInfo
 	subsystems         *CgroupSubsystems
 	cgroupManager      CgroupManager
@@ -176,6 +178,9 @@ func (m *qosContainerManagerImpl) setCPUCgroupConfig(configs map[v1.PodQOSClass]
 			continue
 		}
 		req, _ := resource.PodRequestsAndLimits(pod)
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodVerticalScaling) {
+			req = resource.PodResourceAllocations(pod)
+		}
 		if request, found := req[v1.ResourceCPU]; found {
 			burstablePodCPURequest += request.MilliValue()
 		}
@@ -210,6 +215,9 @@ func (m *qosContainerManagerImpl) setMemoryReserve(configs map[v1.PodQOSClass]*C
 			continue
 		}
 		req, _ := resource.PodRequestsAndLimits(pod)
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlacePodVerticalScaling) {
+			req = resource.PodResourceAllocations(pod)
+		}
 		if request, found := req[v1.ResourceMemory]; found {
 			podMemoryRequest += request.Value()
 		}

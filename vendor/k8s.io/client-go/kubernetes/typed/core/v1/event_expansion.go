@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,7 +20,7 @@ package v1
 import (
 	"fmt"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,6 +40,7 @@ type EventExpansion interface {
 	// Returns the appropriate field selector based on the API version being used to communicate with the server.
 	// The returned field selector can be used with List and Watch to filter desired events.
 	GetFieldSelector(involvedObjectName, involvedObjectNamespace, involvedObjectKind, involvedObjectUID *string) fields.Selector
+	GetFieldSelectorWithMultiTenancy(involvedObjectName, involvedObjectNamespace, involvedObjectKind, involvedObjectUID *string, involvedObjectTenant string) fields.Selector
 }
 
 // CreateWithEventNamespace makes a new event. Returns the copy of the event the server returns,
@@ -46,12 +48,16 @@ type EventExpansion interface {
 // event; it must either match this event client's namespace, or this event
 // client must have been created with the "" namespace.
 func (e *events) CreateWithEventNamespace(event *v1.Event) (*v1.Event, error) {
+	if e.te != "" && event.Tenant != e.te {
+		return nil, fmt.Errorf("can't create an event with tenant '%v' in tenant '%v'", event.Tenant, e.te)
+	}
 	if e.ns != "" && event.Namespace != e.ns {
 		return nil, fmt.Errorf("can't create an event with namespace '%v' in namespace '%v'", event.Namespace, e.ns)
 	}
 	result := &v1.Event{}
 	err := e.client.Post().
-		NamespaceIfScoped(event.Namespace, len(event.Namespace) > 0).
+		TenantIfScoped(event.GetTenant(), len(event.GetTenant()) > 0).
+		NamespaceIfScoped(event.GetNamespace(), len(event.GetNamespace()) > 0).
 		Resource("events").
 		Body(event).
 		Do().
@@ -67,7 +73,8 @@ func (e *events) CreateWithEventNamespace(event *v1.Event) (*v1.Event, error) {
 func (e *events) UpdateWithEventNamespace(event *v1.Event) (*v1.Event, error) {
 	result := &v1.Event{}
 	err := e.client.Put().
-		NamespaceIfScoped(event.Namespace, len(event.Namespace) > 0).
+		TenantIfScoped(event.GetTenant(), len(event.GetTenant()) > 0).
+		NamespaceIfScoped(event.GetNamespace(), len(event.GetNamespace()) > 0).
 		Resource("events").
 		Name(event.Name).
 		Body(event).
@@ -82,12 +89,16 @@ func (e *events) UpdateWithEventNamespace(event *v1.Event) (*v1.Event, error) {
 // match this event client's namespace, or this event client must have been
 // created with the "" namespace.
 func (e *events) PatchWithEventNamespace(incompleteEvent *v1.Event, data []byte) (*v1.Event, error) {
+	if e.ns != "" && incompleteEvent.Tenant != e.ns {
+		return nil, fmt.Errorf("can't patch an event with tenant '%v' in tenant '%v'", incompleteEvent.Tenant, e.ns)
+	}
 	if e.ns != "" && incompleteEvent.Namespace != e.ns {
 		return nil, fmt.Errorf("can't patch an event with namespace '%v' in namespace '%v'", incompleteEvent.Namespace, e.ns)
 	}
 	result := &v1.Event{}
 	err := e.client.Patch(types.StrategicMergePatchType).
-		NamespaceIfScoped(incompleteEvent.Namespace, len(incompleteEvent.Namespace) > 0).
+		TenantIfScoped(incompleteEvent.GetTenant(), len(incompleteEvent.GetTenant()) > 0).
+		NamespaceIfScoped(incompleteEvent.GetNamespace(), len(incompleteEvent.GetNamespace()) > 0).
 		Resource("events").
 		Name(incompleteEvent.Name).
 		Body(data).
@@ -104,17 +115,21 @@ func (e *events) Search(scheme *runtime.Scheme, objOrRef runtime.Object) (*v1.Ev
 	if err != nil {
 		return nil, err
 	}
-	if len(e.ns) > 0 && ref.Namespace != e.ns {
+	// uncomment the follwoing line after the Tenant in objOrRef is defined.
+	//if e.te != "" && ref.Tenant != e.te {
+	//	return nil, fmt.Errorf("won't be able to find any events of tenant '%v' in tenant '%v'", ref.Tenant, e.te)
+	//}
+	if e.ns != "" && ref.Namespace != e.ns {
 		return nil, fmt.Errorf("won't be able to find any events of namespace '%v' in namespace '%v'", ref.Namespace, e.ns)
 	}
 	stringRefKind := string(ref.Kind)
 	var refKind *string
-	if len(stringRefKind) > 0 {
+	if stringRefKind != "" {
 		refKind = &stringRefKind
 	}
 	stringRefUID := string(ref.UID)
 	var refUID *string
-	if len(stringRefUID) > 0 {
+	if stringRefUID != "" {
 		refUID = &stringRefUID
 	}
 	fieldSelector := e.GetFieldSelector(&ref.Name, &ref.Namespace, refKind, refUID)
@@ -124,10 +139,16 @@ func (e *events) Search(scheme *runtime.Scheme, objOrRef runtime.Object) (*v1.Ev
 // Returns the appropriate field selector based on the API version being used to communicate with the server.
 // The returned field selector can be used with List and Watch to filter desired events.
 func (e *events) GetFieldSelector(involvedObjectName, involvedObjectNamespace, involvedObjectKind, involvedObjectUID *string) fields.Selector {
+	return e.GetFieldSelectorWithMultiTenancy(involvedObjectName, involvedObjectNamespace, involvedObjectKind, involvedObjectUID, v1.TenantSystem)
+}
+func (e *events) GetFieldSelectorWithMultiTenancy(involvedObjectName, involvedObjectNamespace, involvedObjectKind, involvedObjectUID *string, involvedObjectTenant string) fields.Selector {
+	apiVersion := e.client.APIVersion().String()
 	field := fields.Set{}
 	if involvedObjectName != nil {
-		field["involvedObject.name"] = *involvedObjectName
+		field[GetInvolvedObjectNameFieldLabel(apiVersion)] = *involvedObjectName
 	}
+	field["involvedObject.tenant"] = involvedObjectTenant
+
 	if involvedObjectNamespace != nil {
 		field["involvedObject.namespace"] = *involvedObjectNamespace
 	}
@@ -141,7 +162,6 @@ func (e *events) GetFieldSelector(involvedObjectName, involvedObjectNamespace, i
 }
 
 // Returns the appropriate field label to use for name of the involved object as per the given API version.
-// DEPRECATED: please use "involvedObject.name" inline.
 func GetInvolvedObjectNameFieldLabel(version string) string {
 	return "involvedObject.name"
 }

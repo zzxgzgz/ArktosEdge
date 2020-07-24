@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -71,9 +72,9 @@ func currentMigrationRules() map[string]string {
 type ClientConfigLoader interface {
 	ConfigAccess
 	// IsDefaultConfig returns true if the returned config matches the defaults.
-	IsDefaultConfig(*restclient.Config) bool
+	IsDefaultConfig(config *restclient.KubeConfig) bool
 	// Load returns the latest config
-	Load() (*clientcmdapi.Config, error)
+	Load() ([]*clientcmdapi.Config, error)
 }
 
 type KubeconfigGetter func() (*clientcmdapi.Config, error)
@@ -85,8 +86,9 @@ type ClientConfigGetter struct {
 // ClientConfigGetter implements the ClientConfigLoader interface.
 var _ ClientConfigLoader = &ClientConfigGetter{}
 
-func (g *ClientConfigGetter) Load() (*clientcmdapi.Config, error) {
-	return g.kubeconfigGetter()
+func (g *ClientConfigGetter) Load() ([]*clientcmdapi.Config, error) {
+	config, err := g.kubeconfigGetter()
+	return []*clientcmdapi.Config{config}, err
 }
 
 func (g *ClientConfigGetter) GetLoadingPrecedence() []string {
@@ -104,7 +106,7 @@ func (g *ClientConfigGetter) IsExplicitFile() bool {
 func (g *ClientConfigGetter) GetExplicitFile() string {
 	return ""
 }
-func (g *ClientConfigGetter) IsDefaultConfig(config *restclient.Config) bool {
+func (g *ClientConfigGetter) IsDefaultConfig(config *restclient.KubeConfig) bool {
 	return false
 }
 
@@ -127,10 +129,6 @@ type ClientConfigLoadingRules struct {
 	// DefaultClientConfig is an optional field indicating what rules to use to calculate a default configuration.
 	// This should match the overrides passed in to ClientConfig loader.
 	DefaultClientConfig ClientConfig
-
-	// WarnIfAllMissing indicates whether the configuration files pointed by KUBECONFIG environment variable are present or not.
-	// In case of missing files, it warns the user about the missing files.
-	WarnIfAllMissing bool
 }
 
 // ClientConfigLoadingRules implements the ClientConfigLoader interface.
@@ -140,23 +138,20 @@ var _ ClientConfigLoader = &ClientConfigLoadingRules{}
 // use this constructor
 func NewDefaultClientConfigLoadingRules() *ClientConfigLoadingRules {
 	chain := []string{}
-	warnIfAllMissing := false
 
 	envVarFiles := os.Getenv(RecommendedConfigPathEnvVar)
 	if len(envVarFiles) != 0 {
 		fileList := filepath.SplitList(envVarFiles)
 		// prevent the same path load multiple times
 		chain = append(chain, deduplicate(fileList)...)
-		warnIfAllMissing = true
 
 	} else {
 		chain = append(chain, RecommendedHomeFile)
 	}
 
 	return &ClientConfigLoadingRules{
-		Precedence:       chain,
-		MigrationRules:   currentMigrationRules(),
-		WarnIfAllMissing: warnIfAllMissing,
+		Precedence:     chain,
+		MigrationRules: currentMigrationRules(),
 	}
 }
 
@@ -173,25 +168,27 @@ func NewDefaultClientConfigLoadingRules() *ClientConfigLoadingRules {
 // non-conflicting entries from the second file's "red-user" are discarded.
 // Relative paths inside of the .kubeconfig files are resolved against the .kubeconfig file's parent folder
 // and only absolute file paths are returned.
-func (rules *ClientConfigLoadingRules) Load() (*clientcmdapi.Config, error) {
+func (rules *ClientConfigLoadingRules) Load() ([]*clientcmdapi.Config, error) {
 	if err := rules.Migrate(); err != nil {
 		return nil, err
 	}
 
 	errlist := []error{}
-	missingList := []string{}
 
 	kubeConfigFiles := []string{}
 
-	// Make sure a file we were explicitly told to use exists
-	if len(rules.ExplicitPath) > 0 {
-		if _, err := os.Stat(rules.ExplicitPath); os.IsNotExist(err) {
-			return nil, err
-		}
-		kubeConfigFiles = append(kubeConfigFiles, rules.ExplicitPath)
+	kubeconfigarray := strings.Split(rules.ExplicitPath, " ")
+	for _, kubeconfigitem := range kubeconfigarray {
+		// Make sure a file we were explicitly told to use exists
+		if len(kubeconfigitem) > 0 {
+			if _, err := os.Stat(kubeconfigitem); os.IsNotExist(err) {
+				return nil, err
+			}
+			kubeConfigFiles = append(kubeConfigFiles, kubeconfigitem)
 
-	} else {
-		kubeConfigFiles = append(kubeConfigFiles, rules.Precedence...)
+		} else {
+			kubeConfigFiles = append(kubeConfigFiles, rules.Precedence...)
+		}
 	}
 
 	kubeconfigs := []*clientcmdapi.Config{}
@@ -203,40 +200,41 @@ func (rules *ClientConfigLoadingRules) Load() (*clientcmdapi.Config, error) {
 		}
 
 		config, err := LoadFromFile(filename)
-
 		if os.IsNotExist(err) {
 			// skip missing files
-			// Add to the missing list to produce a warning
-			missingList = append(missingList, filename)
 			continue
 		}
-
 		if err != nil {
-			errlist = append(errlist, fmt.Errorf("error loading config file \"%s\": %v", filename, err))
+			errlist = append(errlist, fmt.Errorf("Error loading config file \"%s\": %v", filename, err))
 			continue
 		}
 
-		kubeconfigs = append(kubeconfigs, config)
+		mergedConfig, err := rules.mergeConfig(config)
+		if err != nil {
+			errlist = append(errlist, err)
+		}
+
+		kubeconfigs = append(kubeconfigs, mergedConfig)
 	}
 
-	if rules.WarnIfAllMissing && len(missingList) > 0 && len(kubeconfigs) == 0 {
-		klog.Warningf("Config not found: %s", strings.Join(missingList, ", "))
+	if len(kubeconfigs) == 0 {
+		newConfig := clientcmdapi.NewConfig()
+		kubeconfigs = append(kubeconfigs, newConfig)
 	}
 
+	return kubeconfigs, utilerrors.NewAggregate(errlist)
+}
+
+func (rules *ClientConfigLoadingRules) mergeConfig(configInput *clientcmdapi.Config) (*clientcmdapi.Config, error) {
 	// first merge all of our maps
 	mapConfig := clientcmdapi.NewConfig()
 
-	for _, kubeconfig := range kubeconfigs {
-		mergo.MergeWithOverwrite(mapConfig, kubeconfig)
-	}
+	mergo.MergeWithOverwrite(mapConfig, configInput)
 
 	// merge all of the struct values in the reverse order so that priority is given correctly
 	// errors are not added to the list the second time
 	nonMapConfig := clientcmdapi.NewConfig()
-	for i := len(kubeconfigs) - 1; i >= 0; i-- {
-		kubeconfig := kubeconfigs[i]
-		mergo.MergeWithOverwrite(nonMapConfig, kubeconfig)
-	}
+	mergo.MergeWithOverwrite(nonMapConfig, configInput)
 
 	// since values are overwritten, but maps values are not, we can merge the non-map config on top of the map config and
 	// get the values we expect.
@@ -244,12 +242,11 @@ func (rules *ClientConfigLoadingRules) Load() (*clientcmdapi.Config, error) {
 	mergo.MergeWithOverwrite(config, mapConfig)
 	mergo.MergeWithOverwrite(config, nonMapConfig)
 
+	var err error
 	if rules.ResolvePaths() {
-		if err := ResolveLocalPaths(config); err != nil {
-			errlist = append(errlist, err)
-		}
+		err = ResolveLocalPaths(config)
 	}
-	return config, utilerrors.NewAggregate(errlist)
+	return config, err
 }
 
 // Migrate uses the MigrationRules map.  If a destination file is not present, then the source file is checked.
@@ -318,7 +315,7 @@ func (rules *ClientConfigLoadingRules) GetStartingConfig() (*clientcmdapi.Config
 		return nil, err
 	}
 
-	return &rawConfig, nil
+	return &rawConfig[0], nil
 }
 
 // GetDefaultFilename implements ConfigAccess
@@ -351,7 +348,7 @@ func (rules *ClientConfigLoadingRules) GetExplicitFile() string {
 }
 
 // IsDefaultConfig returns true if the provided configuration matches the default
-func (rules *ClientConfigLoadingRules) IsDefaultConfig(config *restclient.Config) bool {
+func (rules *ClientConfigLoadingRules) IsDefaultConfig(kubeConfig *restclient.KubeConfig) bool {
 	if rules.DefaultClientConfig == nil {
 		return false
 	}
@@ -359,7 +356,8 @@ func (rules *ClientConfigLoadingRules) IsDefaultConfig(config *restclient.Config
 	if err != nil {
 		return false
 	}
-	return reflect.DeepEqual(config, defaultConfig)
+	configs := restclient.NewAggregatedConfig(kubeConfig)
+	return reflect.DeepEqual(configs, defaultConfig)
 }
 
 // LoadFromFile takes a filename and deserializes the contents into Config object
@@ -430,6 +428,7 @@ func WriteToFile(config clientcmdapi.Config, filename string) error {
 		}
 	}
 
+	// TODO - check write is append
 	if err := ioutil.WriteFile(filename, content, 0600); err != nil {
 		return err
 	}
@@ -483,7 +482,7 @@ func ResolveLocalPaths(config *clientcmdapi.Config) error {
 		}
 		base, err := filepath.Abs(filepath.Dir(cluster.LocationOfOrigin))
 		if err != nil {
-			return fmt.Errorf("could not determine the absolute path of config file %s: %v", cluster.LocationOfOrigin, err)
+			return fmt.Errorf("Could not determine the absolute path of config file %s: %v", cluster.LocationOfOrigin, err)
 		}
 
 		if err := ResolvePaths(GetClusterFileReferences(cluster), base); err != nil {
@@ -496,7 +495,7 @@ func ResolveLocalPaths(config *clientcmdapi.Config) error {
 		}
 		base, err := filepath.Abs(filepath.Dir(authInfo.LocationOfOrigin))
 		if err != nil {
-			return fmt.Errorf("could not determine the absolute path of config file %s: %v", authInfo.LocationOfOrigin, err)
+			return fmt.Errorf("Could not determine the absolute path of config file %s: %v", authInfo.LocationOfOrigin, err)
 		}
 
 		if err := ResolvePaths(GetAuthInfoFileReferences(authInfo), base); err != nil {

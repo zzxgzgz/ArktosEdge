@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,25 +20,27 @@ limitations under the License.
 package v1
 
 import (
+	rand "math/rand"
+	"time"
+
 	v1 "k8s.io/api/storage/v1"
+	apiserverupdate "k8s.io/client-go/apiserverupdate"
 	"k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 type StorageV1Interface interface {
 	RESTClient() rest.Interface
-	CSINodesGetter
+	RESTClients() []rest.Interface
 	StorageClassesGetter
 	VolumeAttachmentsGetter
 }
 
 // StorageV1Client is used to interact with features provided by the storage.k8s.io group.
 type StorageV1Client struct {
-	restClient rest.Interface
-}
-
-func (c *StorageV1Client) CSINodes() CSINodeInterface {
-	return newCSINodes(c)
+	restClients []rest.Interface
+	configs     *rest.Config
 }
 
 func (c *StorageV1Client) StorageClasses() StorageClassInterface {
@@ -45,20 +48,37 @@ func (c *StorageV1Client) StorageClasses() StorageClassInterface {
 }
 
 func (c *StorageV1Client) VolumeAttachments() VolumeAttachmentInterface {
-	return newVolumeAttachments(c)
+	return newVolumeAttachmentsWithMultiTenancy(c, "system")
+}
+
+func (c *StorageV1Client) VolumeAttachmentsWithMultiTenancy(tenant string) VolumeAttachmentInterface {
+	return newVolumeAttachmentsWithMultiTenancy(c, tenant)
 }
 
 // NewForConfig creates a new StorageV1Client for the given config.
 func NewForConfig(c *rest.Config) (*StorageV1Client, error) {
-	config := *c
-	if err := setConfigDefaults(&config); err != nil {
+	configs := rest.CopyConfigs(c)
+	if err := setConfigDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
-	if err != nil {
-		return nil, err
+
+	clients := make([]rest.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := rest.RESTClientFor(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
 	}
-	return &StorageV1Client{client}, nil
+
+	obj := &StorageV1Client{
+		restClients: clients,
+		configs:     configs,
+	}
+
+	obj.run()
+
+	return obj, nil
 }
 
 // NewForConfigOrDie creates a new StorageV1Client for the given config and
@@ -73,17 +93,21 @@ func NewForConfigOrDie(c *rest.Config) *StorageV1Client {
 
 // New creates a new StorageV1Client for the given RESTClient.
 func New(c rest.Interface) *StorageV1Client {
-	return &StorageV1Client{c}
+	clients := []rest.Interface{c}
+	return &StorageV1Client{restClients: clients}
 }
 
-func setConfigDefaults(config *rest.Config) error {
+func setConfigDefaults(configs *rest.Config) error {
 	gv := v1.SchemeGroupVersion
-	config.GroupVersion = &gv
-	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	for _, config := range configs.GetAllConfigs() {
+		config.GroupVersion = &gv
+		config.APIPath = "/apis"
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+
+		if config.UserAgent == "" {
+			config.UserAgent = rest.DefaultKubernetesUserAgent()
+		}
 	}
 
 	return nil
@@ -95,5 +119,50 @@ func (c *StorageV1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
-	return c.restClient
+
+	max := len(c.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return c.restClients[0]
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	ran := rand.Intn(max)
+	return c.restClients[ran]
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *StorageV1Client) RESTClients() []rest.Interface {
+	if c == nil {
+		return nil
+	}
+
+	return c.restClients
+}
+
+// run watch api server instance updates and recreate connections to new set of api servers
+func (c *StorageV1Client) run() {
+	go func(c *StorageV1Client) {
+		member := c.configs.WatchUpdate()
+		watcherForUpdateComplete := apiserverupdate.GetClientSetsWatcher()
+		watcherForUpdateComplete.AddWatcher()
+
+		for range member.Read {
+			// create new client
+			clients := make([]rest.Interface, len(c.configs.GetAllConfigs()))
+			for i, config := range c.configs.GetAllConfigs() {
+				client, err := rest.RESTClientFor(config)
+				if err != nil {
+					klog.Fatalf("Cannot create rest client for [%+v], err %v", config, err)
+					return
+				}
+				clients[i] = client
+			}
+			c.restClients = clients
+			watcherForUpdateComplete.NotifyDone()
+		}
+	}(c)
 }

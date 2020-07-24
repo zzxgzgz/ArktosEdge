@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -44,6 +45,7 @@ func (c *FakeNodes) Get(name string, options v1.GetOptions) (result *corev1.Node
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Node), err
 }
 
@@ -68,10 +70,13 @@ func (c *FakeNodes) List(opts v1.ListOptions) (result *corev1.NodeList, err erro
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested nodes.
-func (c *FakeNodes) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
+// Watch returns a watch.AggregatedWatchInterface that watches the requested nodes.
+func (c *FakeNodes) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
 		InvokesWatch(testing.NewRootWatchAction(nodesResource, opts))
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a node and creates it.  Returns the server's representation of the node, and an error, if there is any.
@@ -81,6 +86,7 @@ func (c *FakeNodes) Create(node *corev1.Node) (result *corev1.Node, err error) {
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Node), err
 }
 
@@ -91,6 +97,7 @@ func (c *FakeNodes) Update(node *corev1.Node) (result *corev1.Node, err error) {
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Node), err
 }
 
@@ -114,8 +121,8 @@ func (c *FakeNodes) Delete(name string, options *v1.DeleteOptions) error {
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeNodes) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewRootDeleteCollectionAction(nodesResource, listOptions)
 
+	action := testing.NewRootDeleteCollectionAction(nodesResource, listOptions)
 	_, err := c.Fake.Invokes(action, &corev1.NodeList{})
 	return err
 }
@@ -127,5 +134,6 @@ func (c *FakeNodes) Patch(name string, pt types.PatchType, data []byte, subresou
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Node), err
 }

@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +30,11 @@ type FakeCoordinationV1 struct {
 }
 
 func (c *FakeCoordinationV1) Leases(namespace string) v1.LeaseInterface {
-	return &FakeLeases{c, namespace}
+	return &FakeLeases{c, namespace, "system"}
+}
+
+func (c *FakeCoordinationV1) LeasesWithMultiTenancy(namespace string, tenant string) v1.LeaseInterface {
+	return &FakeLeases{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -37,4 +42,11 @@ func (c *FakeCoordinationV1) Leases(namespace string) v1.LeaseInterface {
 func (c *FakeCoordinationV1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeCoordinationV1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,19 +30,35 @@ type FakeRbacV1alpha1 struct {
 }
 
 func (c *FakeRbacV1alpha1) ClusterRoles() v1alpha1.ClusterRoleInterface {
-	return &FakeClusterRoles{c}
+	return &FakeClusterRoles{c, "system"}
+}
+
+func (c *FakeRbacV1alpha1) ClusterRolesWithMultiTenancy(tenant string) v1alpha1.ClusterRoleInterface {
+	return &FakeClusterRoles{c, tenant}
 }
 
 func (c *FakeRbacV1alpha1) ClusterRoleBindings() v1alpha1.ClusterRoleBindingInterface {
-	return &FakeClusterRoleBindings{c}
+	return &FakeClusterRoleBindings{c, "system"}
+}
+
+func (c *FakeRbacV1alpha1) ClusterRoleBindingsWithMultiTenancy(tenant string) v1alpha1.ClusterRoleBindingInterface {
+	return &FakeClusterRoleBindings{c, tenant}
 }
 
 func (c *FakeRbacV1alpha1) Roles(namespace string) v1alpha1.RoleInterface {
-	return &FakeRoles{c, namespace}
+	return &FakeRoles{c, namespace, "system"}
+}
+
+func (c *FakeRbacV1alpha1) RolesWithMultiTenancy(namespace string, tenant string) v1alpha1.RoleInterface {
+	return &FakeRoles{c, namespace, tenant}
 }
 
 func (c *FakeRbacV1alpha1) RoleBindings(namespace string) v1alpha1.RoleBindingInterface {
-	return &FakeRoleBindings{c, namespace}
+	return &FakeRoleBindings{c, namespace, "system"}
+}
+
+func (c *FakeRbacV1alpha1) RoleBindingsWithMultiTenancy(namespace string, tenant string) v1alpha1.RoleBindingInterface {
+	return &FakeRoleBindings{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -49,4 +66,11 @@ func (c *FakeRbacV1alpha1) RoleBindings(namespace string) v1alpha1.RoleBindingIn
 func (c *FakeRbacV1alpha1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeRbacV1alpha1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

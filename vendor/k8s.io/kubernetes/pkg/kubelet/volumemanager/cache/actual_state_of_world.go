@@ -145,6 +145,11 @@ type ActualStateOfWorld interface {
 	// no longer referenced and may be globally unmounted and detached.
 	GetUnmountedVolumes() []AttachedVolume
 
+	// GetPods generates and returns a map of pods in which map is indexed
+	// with pod's unique name. This map can be used to determine which pod is currently
+	// in actual state of world.
+	GetPods() map[volumetypes.UniquePodName]bool
+
 	// MarkFSResizeRequired marks each volume that is successfully attached and
 	// mounted for the specified pod as requiring file system resize (if the plugin for the
 	// volume indicates it requires file system resize).
@@ -393,7 +398,7 @@ func (asw *actualStateOfWorld) addVolume(
 	}
 
 	pluginIsAttachable := false
-	if attachablePlugin, err := asw.volumePluginMgr.FindAttachablePluginBySpec(volumeSpec); err == nil && attachablePlugin != nil {
+	if _, ok := volumePlugin.(volume.AttachableVolumePlugin); ok {
 		pluginIsAttachable = true
 	}
 
@@ -492,7 +497,11 @@ func (asw *actualStateOfWorld) MarkRemountRequired(
 	asw.Lock()
 	defer asw.Unlock()
 	for volumeName, volumeObj := range asw.attachedVolumes {
-		if podObj, podExists := volumeObj.mountedPods[podName]; podExists {
+		for mountedPodName, podObj := range volumeObj.mountedPods {
+			if mountedPodName != podName {
+				continue
+			}
+
 			volumePlugin, err :=
 				asw.volumePluginMgr.FindPluginBySpec(podObj.volumeSpec)
 			if err != nil || volumePlugin == nil {
@@ -519,14 +528,14 @@ func (asw *actualStateOfWorld) MarkFSResizeRequired(
 	podName volumetypes.UniquePodName) {
 	asw.Lock()
 	defer asw.Unlock()
-	volumeObj, volumeExists := asw.attachedVolumes[volumeName]
-	if !volumeExists {
+	volumeObj, exist := asw.attachedVolumes[volumeName]
+	if !exist {
 		klog.Warningf("MarkFSResizeRequired for volume %s failed as volume not exist", volumeName)
 		return
 	}
 
-	podObj, podExists := volumeObj.mountedPods[podName]
-	if !podExists {
+	podObj, exist := volumeObj.mountedPods[podName]
+	if !exist {
 		klog.Warningf("MarkFSResizeRequired for volume %s failed "+
 			"as pod(%s) not exist", volumeName, podName)
 		return
@@ -644,8 +653,8 @@ func (asw *actualStateOfWorld) VolumeExistsWithSpecName(podName volumetypes.Uniq
 	asw.RLock()
 	defer asw.RUnlock()
 	for _, volumeObj := range asw.attachedVolumes {
-		if podObj, podExists := volumeObj.mountedPods[podName]; podExists {
-			if podObj.volumeSpec.Name() == volumeSpecName {
+		for name, podObj := range volumeObj.mountedPods {
+			if podName == name && podObj.volumeSpec.Name() == volumeSpecName {
 				return true
 			}
 		}
@@ -683,10 +692,12 @@ func (asw *actualStateOfWorld) GetMountedVolumesForPod(
 	defer asw.RUnlock()
 	mountedVolume := make([]MountedVolume, 0 /* len */, len(asw.attachedVolumes) /* cap */)
 	for _, volumeObj := range asw.attachedVolumes {
-		if podObj, podExists := volumeObj.mountedPods[podName]; podExists {
-			mountedVolume = append(
-				mountedVolume,
-				getMountedVolume(&podObj, &volumeObj))
+		for mountedPodName, podObj := range volumeObj.mountedPods {
+			if mountedPodName == podName {
+				mountedVolume = append(
+					mountedVolume,
+					getMountedVolume(&podObj, &volumeObj))
+			}
 		}
 	}
 
@@ -736,6 +747,21 @@ func (asw *actualStateOfWorld) GetUnmountedVolumes() []AttachedVolume {
 	}
 
 	return unmountedVolumes
+}
+
+func (asw *actualStateOfWorld) GetPods() map[volumetypes.UniquePodName]bool {
+	asw.RLock()
+	defer asw.RUnlock()
+
+	podList := make(map[volumetypes.UniquePodName]bool)
+	for _, volumeObj := range asw.attachedVolumes {
+		for podName := range volumeObj.mountedPods {
+			if !podList[podName] {
+				podList[podName] = true
+			}
+		}
+	}
+	return podList
 }
 
 func (asw *actualStateOfWorld) newAttachedVolume(

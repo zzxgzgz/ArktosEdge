@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,13 +20,19 @@ limitations under the License.
 package v1beta2
 
 import (
+	rand "math/rand"
+	"time"
+
 	v1beta2 "k8s.io/api/apps/v1beta2"
+	apiserverupdate "k8s.io/client-go/apiserverupdate"
 	"k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 type AppsV1beta2Interface interface {
 	RESTClient() rest.Interface
+	RESTClients() []rest.Interface
 	ControllerRevisionsGetter
 	DaemonSetsGetter
 	DeploymentsGetter
@@ -35,40 +42,74 @@ type AppsV1beta2Interface interface {
 
 // AppsV1beta2Client is used to interact with features provided by the apps group.
 type AppsV1beta2Client struct {
-	restClient rest.Interface
+	restClients []rest.Interface
+	configs     *rest.Config
 }
 
 func (c *AppsV1beta2Client) ControllerRevisions(namespace string) ControllerRevisionInterface {
-	return newControllerRevisions(c, namespace)
+	return newControllerRevisionsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *AppsV1beta2Client) ControllerRevisionsWithMultiTenancy(namespace string, tenant string) ControllerRevisionInterface {
+	return newControllerRevisionsWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *AppsV1beta2Client) DaemonSets(namespace string) DaemonSetInterface {
-	return newDaemonSets(c, namespace)
+	return newDaemonSetsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *AppsV1beta2Client) DaemonSetsWithMultiTenancy(namespace string, tenant string) DaemonSetInterface {
+	return newDaemonSetsWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *AppsV1beta2Client) Deployments(namespace string) DeploymentInterface {
-	return newDeployments(c, namespace)
+	return newDeploymentsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *AppsV1beta2Client) DeploymentsWithMultiTenancy(namespace string, tenant string) DeploymentInterface {
+	return newDeploymentsWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *AppsV1beta2Client) ReplicaSets(namespace string) ReplicaSetInterface {
-	return newReplicaSets(c, namespace)
+	return newReplicaSetsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *AppsV1beta2Client) ReplicaSetsWithMultiTenancy(namespace string, tenant string) ReplicaSetInterface {
+	return newReplicaSetsWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *AppsV1beta2Client) StatefulSets(namespace string) StatefulSetInterface {
-	return newStatefulSets(c, namespace)
+	return newStatefulSetsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *AppsV1beta2Client) StatefulSetsWithMultiTenancy(namespace string, tenant string) StatefulSetInterface {
+	return newStatefulSetsWithMultiTenancy(c, namespace, tenant)
 }
 
 // NewForConfig creates a new AppsV1beta2Client for the given config.
 func NewForConfig(c *rest.Config) (*AppsV1beta2Client, error) {
-	config := *c
-	if err := setConfigDefaults(&config); err != nil {
+	configs := rest.CopyConfigs(c)
+	if err := setConfigDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
-	if err != nil {
-		return nil, err
+
+	clients := make([]rest.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := rest.RESTClientFor(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
 	}
-	return &AppsV1beta2Client{client}, nil
+
+	obj := &AppsV1beta2Client{
+		restClients: clients,
+		configs:     configs,
+	}
+
+	obj.run()
+
+	return obj, nil
 }
 
 // NewForConfigOrDie creates a new AppsV1beta2Client for the given config and
@@ -83,17 +124,21 @@ func NewForConfigOrDie(c *rest.Config) *AppsV1beta2Client {
 
 // New creates a new AppsV1beta2Client for the given RESTClient.
 func New(c rest.Interface) *AppsV1beta2Client {
-	return &AppsV1beta2Client{c}
+	clients := []rest.Interface{c}
+	return &AppsV1beta2Client{restClients: clients}
 }
 
-func setConfigDefaults(config *rest.Config) error {
+func setConfigDefaults(configs *rest.Config) error {
 	gv := v1beta2.SchemeGroupVersion
-	config.GroupVersion = &gv
-	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	for _, config := range configs.GetAllConfigs() {
+		config.GroupVersion = &gv
+		config.APIPath = "/apis"
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+
+		if config.UserAgent == "" {
+			config.UserAgent = rest.DefaultKubernetesUserAgent()
+		}
 	}
 
 	return nil
@@ -105,5 +150,50 @@ func (c *AppsV1beta2Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
-	return c.restClient
+
+	max := len(c.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return c.restClients[0]
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	ran := rand.Intn(max)
+	return c.restClients[ran]
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *AppsV1beta2Client) RESTClients() []rest.Interface {
+	if c == nil {
+		return nil
+	}
+
+	return c.restClients
+}
+
+// run watch api server instance updates and recreate connections to new set of api servers
+func (c *AppsV1beta2Client) run() {
+	go func(c *AppsV1beta2Client) {
+		member := c.configs.WatchUpdate()
+		watcherForUpdateComplete := apiserverupdate.GetClientSetsWatcher()
+		watcherForUpdateComplete.AddWatcher()
+
+		for range member.Read {
+			// create new client
+			clients := make([]rest.Interface, len(c.configs.GetAllConfigs()))
+			for i, config := range c.configs.GetAllConfigs() {
+				client, err := rest.RESTClientFor(config)
+				if err != nil {
+					klog.Fatalf("Cannot create rest client for [%+v], err %v", config, err)
+					return
+				}
+				clients[i] = client
+			}
+			c.restClients = clients
+			watcherForUpdateComplete.NotifyDone()
+		}
+	}(c)
 }

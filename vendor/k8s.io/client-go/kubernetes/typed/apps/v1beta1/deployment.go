@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,20 +20,24 @@ limitations under the License.
 package v1beta1
 
 import (
+	strings "strings"
 	"time"
 
 	v1beta1 "k8s.io/api/apps/v1beta1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 // DeploymentsGetter has a method to return a DeploymentInterface.
 // A group's client should implement this interface.
 type DeploymentsGetter interface {
 	Deployments(namespace string) DeploymentInterface
+	DeploymentsWithMultiTenancy(namespace string, tenant string) DeploymentInterface
 }
 
 // DeploymentInterface has methods to work with Deployment resources.
@@ -44,22 +49,30 @@ type DeploymentInterface interface {
 	DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error
 	Get(name string, options v1.GetOptions) (*v1beta1.Deployment, error)
 	List(opts v1.ListOptions) (*v1beta1.DeploymentList, error)
-	Watch(opts v1.ListOptions) (watch.Interface, error)
+	Watch(opts v1.ListOptions) watch.AggregatedWatchInterface
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.Deployment, err error)
 	DeploymentExpansion
 }
 
 // deployments implements DeploymentInterface
 type deployments struct {
-	client rest.Interface
-	ns     string
+	client  rest.Interface
+	clients []rest.Interface
+	ns      string
+	te      string
 }
 
 // newDeployments returns a Deployments
 func newDeployments(c *AppsV1beta1Client, namespace string) *deployments {
+	return newDeploymentsWithMultiTenancy(c, namespace, "system")
+}
+
+func newDeploymentsWithMultiTenancy(c *AppsV1beta1Client, namespace string, tenant string) *deployments {
 	return &deployments{
-		client: c.RESTClient(),
-		ns:     namespace,
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		ns:      namespace,
+		te:      tenant,
 	}
 }
 
@@ -67,12 +80,14 @@ func newDeployments(c *AppsV1beta1Client, namespace string) *deployments {
 func (c *deployments) Get(name string, options v1.GetOptions) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
 	err = c.client.Get().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("deployments").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -84,52 +99,113 @@ func (c *deployments) List(opts v1.ListOptions) (result *v1beta1.DeploymentList,
 	}
 	result = &v1beta1.DeploymentList{}
 	err = c.client.Get().
-		Namespace(c.ns).
+		Tenant(c.te).Namespace(c.ns).
 		Resource("deployments").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
 		Do().
 		Into(result)
+	if err == nil {
+		return
+	}
+
+	if !(errors.IsForbidden(err) && strings.Contains(err.Error(), "no relationship found between node")) {
+		return
+	}
+
+	// Found api server that works with this list, keep the client
+	for _, client := range c.clients {
+		if client == c.client {
+			continue
+		}
+
+		err = client.Get().
+			Tenant(c.te).Namespace(c.ns).
+			Resource("deployments").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Do().
+			Into(result)
+
+		if err == nil {
+			c.client = client
+			return
+		}
+
+		if err != nil && errors.IsForbidden(err) &&
+			strings.Contains(err.Error(), "no relationship found between node") {
+			klog.V(6).Infof("Skip error %v in list", err)
+			continue
+		}
+	}
+
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested deployments.
-func (c *deployments) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *deployments) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
 	var timeout time.Duration
 	if opts.TimeoutSeconds != nil {
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("deployments").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch()
+	aggWatch := watch.NewAggregatedWatcher()
+	for _, client := range c.clients {
+		watcher, err := client.Get().
+			Tenant(c.te).
+			Namespace(c.ns).
+			Resource("deployments").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Watch()
+		if err != nil && opts.AllowPartialWatch && errors.IsForbidden(err) {
+			// watch error was not returned properly in error message. Skip when partial watch is allowed
+			klog.V(6).Infof("Watch error for partial watch %v. options [%+v]", err, opts)
+			continue
+		}
+		aggWatch.AddWatchInterface(watcher, err)
+	}
+	return aggWatch
 }
 
 // Create takes the representation of a deployment and creates it.  Returns the server's representation of the deployment, and an error, if there is any.
 func (c *deployments) Create(deployment *v1beta1.Deployment) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
+
+	objectTenant := deployment.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Post().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("deployments").
 		Body(deployment).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Update takes the representation of a deployment and updates it. Returns the server's representation of the deployment, and an error, if there is any.
 func (c *deployments) Update(deployment *v1beta1.Deployment) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
+
+	objectTenant := deployment.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("deployments").
 		Name(deployment.Name).
 		Body(deployment).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -138,7 +214,14 @@ func (c *deployments) Update(deployment *v1beta1.Deployment) (result *v1beta1.De
 
 func (c *deployments) UpdateStatus(deployment *v1beta1.Deployment) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
+
+	objectTenant := deployment.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("deployments").
 		Name(deployment.Name).
@@ -146,12 +229,14 @@ func (c *deployments) UpdateStatus(deployment *v1beta1.Deployment) (result *v1be
 		Body(deployment).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Delete takes name of the deployment and deletes it. Returns an error if one occurs.
 func (c *deployments) Delete(name string, options *v1.DeleteOptions) error {
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("deployments").
 		Name(name).
@@ -167,6 +252,7 @@ func (c *deployments) DeleteCollection(options *v1.DeleteOptions, listOptions v1
 		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
 	}
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("deployments").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
@@ -180,6 +266,7 @@ func (c *deployments) DeleteCollection(options *v1.DeleteOptions, listOptions v1
 func (c *deployments) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.Deployment, err error) {
 	result = &v1beta1.Deployment{}
 	err = c.client.Patch(pt).
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("deployments").
 		SubResource(subresources...).
@@ -187,5 +274,6 @@ func (c *deployments) Patch(name string, pt types.PatchType, data []byte, subres
 		Body(data).
 		Do().
 		Into(result)
+
 	return
 }

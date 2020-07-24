@@ -19,8 +19,8 @@ package metrics
 import (
 	"sync"
 
-	"k8s.io/component-base/metrics"
-	"k8s.io/component-base/metrics/legacyregistry"
+	"github.com/prometheus/client_golang/prometheus"
+	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/kubelet/volumemanager/cache"
 	"k8s.io/kubernetes/pkg/volume"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
@@ -36,12 +36,11 @@ const (
 var (
 	registerMetrics sync.Once
 
-	totalVolumesDesc = metrics.NewDesc(
+	totalVolumesDesc = prometheus.NewDesc(
 		volumeManagerTotalVolumes,
 		"Number of volumes in Volume Manager",
 		[]string{"plugin_name", "state"},
 		nil,
-		metrics.ALPHA, "",
 	)
 )
 
@@ -60,34 +59,36 @@ func (v volumeCount) add(state, plugin string) {
 // Register registers Volume Manager metrics.
 func Register(asw cache.ActualStateOfWorld, dsw cache.DesiredStateOfWorld, pluginMgr *volume.VolumePluginMgr) {
 	registerMetrics.Do(func() {
-		legacyregistry.CustomMustRegister(&totalVolumesCollector{asw: asw, dsw: dsw, pluginMgr: pluginMgr})
+		prometheus.MustRegister(&totalVolumesCollector{asw, dsw, pluginMgr})
 	})
 }
 
 type totalVolumesCollector struct {
-	metrics.BaseStableCollector
-
 	asw       cache.ActualStateOfWorld
 	dsw       cache.DesiredStateOfWorld
 	pluginMgr *volume.VolumePluginMgr
 }
 
-var _ metrics.StableCollector = &totalVolumesCollector{}
+var _ prometheus.Collector = &totalVolumesCollector{}
 
-// DescribeWithStability implements the metrics.StableCollector interface.
-func (c *totalVolumesCollector) DescribeWithStability(ch chan<- *metrics.Desc) {
+// Describe implements the prometheus.Collector interface.
+func (c *totalVolumesCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- totalVolumesDesc
 }
 
-// CollectWithStability implements the metrics.StableCollector interface.
-func (c *totalVolumesCollector) CollectWithStability(ch chan<- metrics.Metric) {
+// Collect implements the prometheus.Collector interface.
+func (c *totalVolumesCollector) Collect(ch chan<- prometheus.Metric) {
 	for stateName, pluginCount := range c.getVolumeCount() {
 		for pluginName, count := range pluginCount {
-			ch <- metrics.NewLazyConstMetric(totalVolumesDesc,
-				metrics.GaugeValue,
+			metric, err := prometheus.NewConstMetric(totalVolumesDesc,
+				prometheus.GaugeValue,
 				float64(count),
 				pluginName,
 				stateName)
+			if err != nil {
+				klog.Warningf("Failed to create metric : %v", err)
+			}
+			ch <- metric
 		}
 	}
 }

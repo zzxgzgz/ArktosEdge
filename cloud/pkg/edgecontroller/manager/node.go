@@ -1,7 +1,7 @@
 package manager
 
 import (
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/watch"
@@ -31,7 +31,7 @@ func NewNodesManager(kubeClient *kubernetes.Clientset, namespace string) (*Nodes
 	optionModifier := func(options *metav1.ListOptions) {
 		options.LabelSelector = selector.String()
 	}
-	lw := cache.NewFilteredListWatchFromClient(kubeClient.CoreV1().RESTClient(), "nodes", namespace, optionModifier)
+	lw := cache.NewFilteredListWatchFromClient(kubeClient.CoreV1(), "nodes", namespace, optionModifier)
 	events := make(chan watch.Event)
 	rh := NewCommonResourceEventHandler(events)
 	si := cache.NewSharedInformer(lw, &v1.Node{}, 0)

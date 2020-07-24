@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,6 +34,7 @@ var supportedTags = []string{
 	"genclient:noStatus",
 	"genclient:readonly",
 	"genclient:method",
+	"genclient:nonTenanted",
 }
 
 // SupportedVerbs is a list of supported verbs for +onlyVerbs and +skipVerbs.
@@ -160,6 +162,8 @@ type Tags struct {
 	SkipVerbs []string
 	// +genclient:method=UpdateScale,verb=update,subresource=scale,input=Scale,result=Scale
 	Extensions []extension
+	// +genclient:nonTenanted
+	NonTenanted bool
 }
 
 // HasVerb returns true if we should include the given verb in final client interface and
@@ -190,7 +194,7 @@ func MustParseClientGenTags(lines []string) Tags {
 func ParseClientGenTags(lines []string) (Tags, error) {
 	ret := Tags{}
 	values := types.ExtractCommentTags("+", lines)
-	var value []string
+	value := []string{}
 	value, ret.GenerateClient = values["genclient"]
 	// Check the old format and error when used to avoid generating client when //+genclient=false
 	if len(value) > 0 && len(value[0]) > 0 {
@@ -201,6 +205,12 @@ func ParseClientGenTags(lines []string) (Tags, error) {
 	if value := values["nonNamespaced"]; len(value) > 0 && len(value[0]) > 0 {
 		return ret, fmt.Errorf("+nonNamespaced=%s is invalid, use //+genclient:nonNamespaced instead", value[0])
 	}
+
+	_, ret.NonTenanted = values[genClientPrefix+"nonTenanted"]
+	if !ret.NonNamespaced && ret.NonTenanted {
+		return ret, fmt.Errorf("Invalid scope: Namespaced but not tenanted.")
+	}
+
 	_, ret.NoVerbs = values[genClientPrefix+"noVerbs"]
 	_, ret.NoStatus = values[genClientPrefix+"noStatus"]
 	onlyVerbs := []string{}

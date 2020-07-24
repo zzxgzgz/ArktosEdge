@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,15 +30,27 @@ type FakeAppsV1beta1 struct {
 }
 
 func (c *FakeAppsV1beta1) ControllerRevisions(namespace string) v1beta1.ControllerRevisionInterface {
-	return &FakeControllerRevisions{c, namespace}
+	return &FakeControllerRevisions{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1beta1) ControllerRevisionsWithMultiTenancy(namespace string, tenant string) v1beta1.ControllerRevisionInterface {
+	return &FakeControllerRevisions{c, namespace, tenant}
 }
 
 func (c *FakeAppsV1beta1) Deployments(namespace string) v1beta1.DeploymentInterface {
-	return &FakeDeployments{c, namespace}
+	return &FakeDeployments{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1beta1) DeploymentsWithMultiTenancy(namespace string, tenant string) v1beta1.DeploymentInterface {
+	return &FakeDeployments{c, namespace, tenant}
 }
 
 func (c *FakeAppsV1beta1) StatefulSets(namespace string) v1beta1.StatefulSetInterface {
-	return &FakeStatefulSets{c, namespace}
+	return &FakeStatefulSets{c, namespace, "system"}
+}
+
+func (c *FakeAppsV1beta1) StatefulSetsWithMultiTenancy(namespace string, tenant string) v1beta1.StatefulSetInterface {
+	return &FakeStatefulSets{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -45,4 +58,11 @@ func (c *FakeAppsV1beta1) StatefulSets(namespace string) v1beta1.StatefulSetInte
 func (c *FakeAppsV1beta1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeAppsV1beta1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

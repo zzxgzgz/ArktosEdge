@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,36 +20,60 @@ limitations under the License.
 package v1alpha1
 
 import (
+	rand "math/rand"
+	"time"
+
 	v1alpha1 "k8s.io/api/auditregistration/v1alpha1"
+	apiserverupdate "k8s.io/client-go/apiserverupdate"
 	"k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 type AuditregistrationV1alpha1Interface interface {
 	RESTClient() rest.Interface
+	RESTClients() []rest.Interface
 	AuditSinksGetter
 }
 
 // AuditregistrationV1alpha1Client is used to interact with features provided by the auditregistration.k8s.io group.
 type AuditregistrationV1alpha1Client struct {
-	restClient rest.Interface
+	restClients []rest.Interface
+	configs     *rest.Config
 }
 
 func (c *AuditregistrationV1alpha1Client) AuditSinks() AuditSinkInterface {
-	return newAuditSinks(c)
+	return newAuditSinksWithMultiTenancy(c, "system")
+}
+
+func (c *AuditregistrationV1alpha1Client) AuditSinksWithMultiTenancy(tenant string) AuditSinkInterface {
+	return newAuditSinksWithMultiTenancy(c, tenant)
 }
 
 // NewForConfig creates a new AuditregistrationV1alpha1Client for the given config.
 func NewForConfig(c *rest.Config) (*AuditregistrationV1alpha1Client, error) {
-	config := *c
-	if err := setConfigDefaults(&config); err != nil {
+	configs := rest.CopyConfigs(c)
+	if err := setConfigDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
-	if err != nil {
-		return nil, err
+
+	clients := make([]rest.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := rest.RESTClientFor(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
 	}
-	return &AuditregistrationV1alpha1Client{client}, nil
+
+	obj := &AuditregistrationV1alpha1Client{
+		restClients: clients,
+		configs:     configs,
+	}
+
+	obj.run()
+
+	return obj, nil
 }
 
 // NewForConfigOrDie creates a new AuditregistrationV1alpha1Client for the given config and
@@ -63,17 +88,21 @@ func NewForConfigOrDie(c *rest.Config) *AuditregistrationV1alpha1Client {
 
 // New creates a new AuditregistrationV1alpha1Client for the given RESTClient.
 func New(c rest.Interface) *AuditregistrationV1alpha1Client {
-	return &AuditregistrationV1alpha1Client{c}
+	clients := []rest.Interface{c}
+	return &AuditregistrationV1alpha1Client{restClients: clients}
 }
 
-func setConfigDefaults(config *rest.Config) error {
+func setConfigDefaults(configs *rest.Config) error {
 	gv := v1alpha1.SchemeGroupVersion
-	config.GroupVersion = &gv
-	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	for _, config := range configs.GetAllConfigs() {
+		config.GroupVersion = &gv
+		config.APIPath = "/apis"
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+
+		if config.UserAgent == "" {
+			config.UserAgent = rest.DefaultKubernetesUserAgent()
+		}
 	}
 
 	return nil
@@ -85,5 +114,50 @@ func (c *AuditregistrationV1alpha1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
-	return c.restClient
+
+	max := len(c.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return c.restClients[0]
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	ran := rand.Intn(max)
+	return c.restClients[ran]
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *AuditregistrationV1alpha1Client) RESTClients() []rest.Interface {
+	if c == nil {
+		return nil
+	}
+
+	return c.restClients
+}
+
+// run watch api server instance updates and recreate connections to new set of api servers
+func (c *AuditregistrationV1alpha1Client) run() {
+	go func(c *AuditregistrationV1alpha1Client) {
+		member := c.configs.WatchUpdate()
+		watcherForUpdateComplete := apiserverupdate.GetClientSetsWatcher()
+		watcherForUpdateComplete.AddWatcher()
+
+		for range member.Read {
+			// create new client
+			clients := make([]rest.Interface, len(c.configs.GetAllConfigs()))
+			for i, config := range c.configs.GetAllConfigs() {
+				client, err := rest.RESTClientFor(config)
+				if err != nil {
+					klog.Fatalf("Cannot create rest client for [%+v], err %v", config, err)
+					return
+				}
+				clients[i] = client
+			}
+			c.restClients = clients
+			watcherForUpdateComplete.NotifyDone()
+		}
+	}(c)
 }

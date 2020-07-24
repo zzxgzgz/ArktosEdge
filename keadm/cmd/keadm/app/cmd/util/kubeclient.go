@@ -3,12 +3,11 @@ package util
 import (
 	"fmt"
 
+	"github.com/kubeedge/kubeedge/common/constants"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog"
-
-	"github.com/kubeedge/kubeedge/common/constants"
 )
 
 func kubeConfig(kubeconfigPath string) (conf *rest.Config, err error) {
@@ -16,9 +15,10 @@ func kubeConfig(kubeconfigPath string) (conf *rest.Config, err error) {
 	if err != nil {
 		return nil, err
 	}
-	kubeConfig.QPS = float32(constants.DefaultKubeQPS)
-	kubeConfig.Burst = int(constants.DefaultKubeBurst)
-	kubeConfig.ContentType = constants.DefaultKubeContentType
+	kconfig := kubeConfig.GetConfig()
+	kconfig.QPS = float32(constants.DefaultKubeQPS)
+	kconfig.Burst = int(constants.DefaultKubeBurst)
+	kconfig.ContentType = constants.DefaultKubeContentType
 
 	return kubeConfig, nil
 }

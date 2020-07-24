@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -271,6 +272,7 @@ func IsServiceIPSet(service *core.Service) bool {
 }
 
 var standardFinalizers = sets.NewString(
+	string(core.FinalizerArktos),
 	string(core.FinalizerKubernetes),
 	metav1.FinalizerOrphanDependents,
 	metav1.FinalizerDeleteDependents,
@@ -279,6 +281,34 @@ var standardFinalizers = sets.NewString(
 // IsStandardFinalizerName checks if the input string is a standard finalizer name
 func IsStandardFinalizerName(str string) bool {
 	return standardFinalizers.Has(str)
+}
+
+// LoadBalancerStatusEqual checks if the status of the load balancer is equal to the target status
+// TODO: make method on LoadBalancerStatus?
+func LoadBalancerStatusEqual(l, r *core.LoadBalancerStatus) bool {
+	return ingressSliceEqual(l.Ingress, r.Ingress)
+}
+
+func ingressSliceEqual(lhs, rhs []core.LoadBalancerIngress) bool {
+	if len(lhs) != len(rhs) {
+		return false
+	}
+	for i := range lhs {
+		if !ingressEqual(&lhs[i], &rhs[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func ingressEqual(lhs, rhs *core.LoadBalancerIngress) bool {
+	if lhs.IP != rhs.IP {
+		return false
+	}
+	if lhs.Hostname != rhs.Hostname {
+		return false
+	}
+	return true
 }
 
 // GetAccessModesAsString returns a string representation of an array of access modes.

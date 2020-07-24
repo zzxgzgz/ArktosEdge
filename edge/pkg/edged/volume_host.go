@@ -40,10 +40,10 @@ import (
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/volume"
-	"k8s.io/kubernetes/pkg/volume/util/hostutil"
+
+	// "k8s.io/kubernetes/pkg/volume/util/hostutil"
+	k8sexec "k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
-	utilexec "k8s.io/utils/exec"
-	"k8s.io/utils/mount"
 )
 
 // NewInitializedVolumePluginMgr returns a new instance of volume.VolumePluginMgr
@@ -127,15 +127,15 @@ func (evh *edgedVolumeHost) NewWrapperUnmounter(volName string, spec volume.Spec
 }
 
 // Below is part of k8s.io/kubernetes/pkg/volume.VolumeHost interface.
-func (evh *edgedVolumeHost) GetMounter(pluginName string) mount.Interface { return evh.edge.mounter }
-func (evh *edgedVolumeHost) GetHostName() string                          { return evh.edge.hostname }
-func (evh *edgedVolumeHost) GetCloudProvider() cloudprovider.Interface    { return nil }
+func (evh *edgedVolumeHost) GetMounter(pluginName string) k8sexec.Interface { return evh.edge.mounter }
+func (evh *edgedVolumeHost) GetHostName() string                            { return evh.edge.hostname }
+func (evh *edgedVolumeHost) GetCloudProvider() cloudprovider.Interface      { return nil }
 func (evh *edgedVolumeHost) GetConfigMapFunc() func(namespace, name string) (*api.ConfigMap, error) {
 	return func(namespace, name string) (*api.ConfigMap, error) {
 		return evh.edge.metaClient.ConfigMaps(namespace).Get(name)
 	}
 }
-func (evh *edgedVolumeHost) GetExec(pluginName string) utilexec.Interface  { return nil }
+func (evh *edgedVolumeHost) GetExec(pluginName string) k8sexec.Exec        { return nil }
 func (evh *edgedVolumeHost) GetHostIP() (net.IP, error)                    { return nil, nil }
 func (evh *edgedVolumeHost) GetNodeAllocatable() (api.ResourceList, error) { return nil, nil }
 func (evh *edgedVolumeHost) GetNodeLabels() (map[string]string, error) {
@@ -149,8 +149,8 @@ func (evh *edgedVolumeHost) GetNodeName() types.NodeName { return types.NodeName
 func (evh *edgedVolumeHost) GetPodVolumeDeviceDir(podUID types.UID, pluginName string) string {
 	return ""
 }
-func (evh *edgedVolumeHost) GetSecretFunc() func(namespace, name string) (*api.Secret, error) {
-	return func(namespace, name string) (*api.Secret, error) {
+func (evh *edgedVolumeHost) GetSecretFunc() func(tenant, namespace, name string) (*api.Secret, error) {
+	return func(tenant, namespace, name string) (*api.Secret, error) {
 		return evh.edge.metaClient.Secrets(namespace).Get(name)
 	}
 }
@@ -179,9 +179,9 @@ func (evh *edgedVolumeHost) GetSubpather() subpath.Interface {
 	return subpath.New(evh.edge.mounter)
 }
 
-func (evh *edgedVolumeHost) GetHostUtil() hostutil.HostUtils {
-	return evh.edge.hostUtil
-}
+// func (evh *edgedVolumeHost) GetHostUtil() hostutil.HostUtils {
+// 	return evh.edge.hostUtil
+// }
 
 // TODO: Evaluate the funcs releated to csi
 func (evh *edgedVolumeHost) SetKubeletError(err error) {

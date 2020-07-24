@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,20 +20,24 @@ limitations under the License.
 package v1beta1
 
 import (
+	strings "strings"
 	"time"
 
 	v1beta1 "k8s.io/api/extensions/v1beta1"
+	errors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	scheme "k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 // ReplicaSetsGetter has a method to return a ReplicaSetInterface.
 // A group's client should implement this interface.
 type ReplicaSetsGetter interface {
 	ReplicaSets(namespace string) ReplicaSetInterface
+	ReplicaSetsWithMultiTenancy(namespace string, tenant string) ReplicaSetInterface
 }
 
 // ReplicaSetInterface has methods to work with ReplicaSet resources.
@@ -44,7 +49,7 @@ type ReplicaSetInterface interface {
 	DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error
 	Get(name string, options v1.GetOptions) (*v1beta1.ReplicaSet, error)
 	List(opts v1.ListOptions) (*v1beta1.ReplicaSetList, error)
-	Watch(opts v1.ListOptions) (watch.Interface, error)
+	Watch(opts v1.ListOptions) watch.AggregatedWatchInterface
 	Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.ReplicaSet, err error)
 	GetScale(replicaSetName string, options v1.GetOptions) (*v1beta1.Scale, error)
 	UpdateScale(replicaSetName string, scale *v1beta1.Scale) (*v1beta1.Scale, error)
@@ -54,15 +59,23 @@ type ReplicaSetInterface interface {
 
 // replicaSets implements ReplicaSetInterface
 type replicaSets struct {
-	client rest.Interface
-	ns     string
+	client  rest.Interface
+	clients []rest.Interface
+	ns      string
+	te      string
 }
 
 // newReplicaSets returns a ReplicaSets
 func newReplicaSets(c *ExtensionsV1beta1Client, namespace string) *replicaSets {
+	return newReplicaSetsWithMultiTenancy(c, namespace, "system")
+}
+
+func newReplicaSetsWithMultiTenancy(c *ExtensionsV1beta1Client, namespace string, tenant string) *replicaSets {
 	return &replicaSets{
-		client: c.RESTClient(),
-		ns:     namespace,
+		client:  c.RESTClient(),
+		clients: c.RESTClients(),
+		ns:      namespace,
+		te:      tenant,
 	}
 }
 
@@ -70,12 +83,14 @@ func newReplicaSets(c *ExtensionsV1beta1Client, namespace string) *replicaSets {
 func (c *replicaSets) Get(name string, options v1.GetOptions) (result *v1beta1.ReplicaSet, err error) {
 	result = &v1beta1.ReplicaSet{}
 	err = c.client.Get().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Name(name).
 		VersionedParams(&options, scheme.ParameterCodec).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -87,52 +102,113 @@ func (c *replicaSets) List(opts v1.ListOptions) (result *v1beta1.ReplicaSetList,
 	}
 	result = &v1beta1.ReplicaSetList{}
 	err = c.client.Get().
-		Namespace(c.ns).
+		Tenant(c.te).Namespace(c.ns).
 		Resource("replicasets").
 		VersionedParams(&opts, scheme.ParameterCodec).
 		Timeout(timeout).
 		Do().
 		Into(result)
+	if err == nil {
+		return
+	}
+
+	if !(errors.IsForbidden(err) && strings.Contains(err.Error(), "no relationship found between node")) {
+		return
+	}
+
+	// Found api server that works with this list, keep the client
+	for _, client := range c.clients {
+		if client == c.client {
+			continue
+		}
+
+		err = client.Get().
+			Tenant(c.te).Namespace(c.ns).
+			Resource("replicasets").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Do().
+			Into(result)
+
+		if err == nil {
+			c.client = client
+			return
+		}
+
+		if err != nil && errors.IsForbidden(err) &&
+			strings.Contains(err.Error(), "no relationship found between node") {
+			klog.V(6).Infof("Skip error %v in list", err)
+			continue
+		}
+	}
+
 	return
 }
 
 // Watch returns a watch.Interface that watches the requested replicaSets.
-func (c *replicaSets) Watch(opts v1.ListOptions) (watch.Interface, error) {
+func (c *replicaSets) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
 	var timeout time.Duration
 	if opts.TimeoutSeconds != nil {
 		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
 	}
 	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("replicasets").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch()
+	aggWatch := watch.NewAggregatedWatcher()
+	for _, client := range c.clients {
+		watcher, err := client.Get().
+			Tenant(c.te).
+			Namespace(c.ns).
+			Resource("replicasets").
+			VersionedParams(&opts, scheme.ParameterCodec).
+			Timeout(timeout).
+			Watch()
+		if err != nil && opts.AllowPartialWatch && errors.IsForbidden(err) {
+			// watch error was not returned properly in error message. Skip when partial watch is allowed
+			klog.V(6).Infof("Watch error for partial watch %v. options [%+v]", err, opts)
+			continue
+		}
+		aggWatch.AddWatchInterface(watcher, err)
+	}
+	return aggWatch
 }
 
 // Create takes the representation of a replicaSet and creates it.  Returns the server's representation of the replicaSet, and an error, if there is any.
 func (c *replicaSets) Create(replicaSet *v1beta1.ReplicaSet) (result *v1beta1.ReplicaSet, err error) {
 	result = &v1beta1.ReplicaSet{}
+
+	objectTenant := replicaSet.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Post().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Body(replicaSet).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Update takes the representation of a replicaSet and updates it. Returns the server's representation of the replicaSet, and an error, if there is any.
 func (c *replicaSets) Update(replicaSet *v1beta1.ReplicaSet) (result *v1beta1.ReplicaSet, err error) {
 	result = &v1beta1.ReplicaSet{}
+
+	objectTenant := replicaSet.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Name(replicaSet.Name).
 		Body(replicaSet).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -141,7 +217,14 @@ func (c *replicaSets) Update(replicaSet *v1beta1.ReplicaSet) (result *v1beta1.Re
 
 func (c *replicaSets) UpdateStatus(replicaSet *v1beta1.ReplicaSet) (result *v1beta1.ReplicaSet, err error) {
 	result = &v1beta1.ReplicaSet{}
+
+	objectTenant := replicaSet.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Name(replicaSet.Name).
@@ -149,12 +232,14 @@ func (c *replicaSets) UpdateStatus(replicaSet *v1beta1.ReplicaSet) (result *v1be
 		Body(replicaSet).
 		Do().
 		Into(result)
+
 	return
 }
 
 // Delete takes name of the replicaSet and deletes it. Returns an error if one occurs.
 func (c *replicaSets) Delete(name string, options *v1.DeleteOptions) error {
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Name(name).
@@ -170,6 +255,7 @@ func (c *replicaSets) DeleteCollection(options *v1.DeleteOptions, listOptions v1
 		timeout = time.Duration(*listOptions.TimeoutSeconds) * time.Second
 	}
 	return c.client.Delete().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("replicasets").
 		VersionedParams(&listOptions, scheme.ParameterCodec).
@@ -183,6 +269,7 @@ func (c *replicaSets) DeleteCollection(options *v1.DeleteOptions, listOptions v1
 func (c *replicaSets) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.ReplicaSet, err error) {
 	result = &v1beta1.ReplicaSet{}
 	err = c.client.Patch(pt).
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("replicasets").
 		SubResource(subresources...).
@@ -190,6 +277,7 @@ func (c *replicaSets) Patch(name string, pt types.PatchType, data []byte, subres
 		Body(data).
 		Do().
 		Into(result)
+
 	return
 }
 
@@ -197,6 +285,7 @@ func (c *replicaSets) Patch(name string, pt types.PatchType, data []byte, subres
 func (c *replicaSets) GetScale(replicaSetName string, options v1.GetOptions) (result *v1beta1.Scale, err error) {
 	result = &v1beta1.Scale{}
 	err = c.client.Get().
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Name(replicaSetName).
@@ -204,13 +293,21 @@ func (c *replicaSets) GetScale(replicaSetName string, options v1.GetOptions) (re
 		VersionedParams(&options, scheme.ParameterCodec).
 		Do().
 		Into(result)
+
 	return
 }
 
 // UpdateScale takes the top resource name and the representation of a scale and updates it. Returns the server's representation of the scale, and an error, if there is any.
 func (c *replicaSets) UpdateScale(replicaSetName string, scale *v1beta1.Scale) (result *v1beta1.Scale, err error) {
 	result = &v1beta1.Scale{}
+
+	objectTenant := scale.ObjectMeta.Tenant
+	if objectTenant == "" {
+		objectTenant = c.te
+	}
+
 	err = c.client.Put().
+		Tenant(objectTenant).
 		Namespace(c.ns).
 		Resource("replicasets").
 		Name(replicaSetName).
@@ -218,5 +315,6 @@ func (c *replicaSets) UpdateScale(replicaSetName string, scale *v1beta1.Scale) (
 		Body(scale).
 		Do().
 		Into(result)
+
 	return
 }

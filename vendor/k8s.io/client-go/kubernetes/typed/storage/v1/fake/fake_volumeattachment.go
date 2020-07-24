@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,6 +32,7 @@ import (
 // FakeVolumeAttachments implements VolumeAttachmentInterface
 type FakeVolumeAttachments struct {
 	Fake *FakeStorageV1
+	te   string
 }
 
 var volumeattachmentsResource = schema.GroupVersionResource{Group: "storage.k8s.io", Version: "v1", Resource: "volumeattachments"}
@@ -40,17 +42,20 @@ var volumeattachmentsKind = schema.GroupVersionKind{Group: "storage.k8s.io", Ver
 // Get takes name of the volumeAttachment, and returns the corresponding volumeAttachment object, and an error if there is any.
 func (c *FakeVolumeAttachments) Get(name string, options v1.GetOptions) (result *storagev1.VolumeAttachment, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootGetAction(volumeattachmentsResource, name), &storagev1.VolumeAttachment{})
+		Invokes(testing.NewTenantGetAction(volumeattachmentsResource, name, c.te), &storagev1.VolumeAttachment{})
+
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*storagev1.VolumeAttachment), err
 }
 
 // List takes label and field selectors, and returns the list of VolumeAttachments that match those selectors.
 func (c *FakeVolumeAttachments) List(opts v1.ListOptions) (result *storagev1.VolumeAttachmentList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootListAction(volumeattachmentsResource, volumeattachmentsKind, opts), &storagev1.VolumeAttachmentList{})
+		Invokes(testing.NewTenantListAction(volumeattachmentsResource, volumeattachmentsKind, opts, c.te), &storagev1.VolumeAttachmentList{})
+
 	if obj == nil {
 		return nil, err
 	}
@@ -68,29 +73,37 @@ func (c *FakeVolumeAttachments) List(opts v1.ListOptions) (result *storagev1.Vol
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested volumeAttachments.
-func (c *FakeVolumeAttachments) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewRootWatchAction(volumeattachmentsResource, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested volumeAttachments.
+func (c *FakeVolumeAttachments) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewTenantWatchAction(volumeattachmentsResource, opts, c.te))
+
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a volumeAttachment and creates it.  Returns the server's representation of the volumeAttachment, and an error, if there is any.
 func (c *FakeVolumeAttachments) Create(volumeAttachment *storagev1.VolumeAttachment) (result *storagev1.VolumeAttachment, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootCreateAction(volumeattachmentsResource, volumeAttachment), &storagev1.VolumeAttachment{})
+		Invokes(testing.NewTenantCreateAction(volumeattachmentsResource, volumeAttachment, c.te), &storagev1.VolumeAttachment{})
+
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*storagev1.VolumeAttachment), err
 }
 
 // Update takes the representation of a volumeAttachment and updates it. Returns the server's representation of the volumeAttachment, and an error, if there is any.
 func (c *FakeVolumeAttachments) Update(volumeAttachment *storagev1.VolumeAttachment) (result *storagev1.VolumeAttachment, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootUpdateAction(volumeattachmentsResource, volumeAttachment), &storagev1.VolumeAttachment{})
+		Invokes(testing.NewTenantUpdateAction(volumeattachmentsResource, volumeAttachment, c.te), &storagev1.VolumeAttachment{})
+
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*storagev1.VolumeAttachment), err
 }
 
@@ -98,7 +111,8 @@ func (c *FakeVolumeAttachments) Update(volumeAttachment *storagev1.VolumeAttachm
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 func (c *FakeVolumeAttachments) UpdateStatus(volumeAttachment *storagev1.VolumeAttachment) (*storagev1.VolumeAttachment, error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootUpdateSubresourceAction(volumeattachmentsResource, "status", volumeAttachment), &storagev1.VolumeAttachment{})
+		Invokes(testing.NewTenantUpdateSubresourceAction(volumeattachmentsResource, "status", volumeAttachment, c.te), &storagev1.VolumeAttachment{})
+
 	if obj == nil {
 		return nil, err
 	}
@@ -108,13 +122,15 @@ func (c *FakeVolumeAttachments) UpdateStatus(volumeAttachment *storagev1.VolumeA
 // Delete takes name of the volumeAttachment and deletes it. Returns an error if one occurs.
 func (c *FakeVolumeAttachments) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewRootDeleteAction(volumeattachmentsResource, name), &storagev1.VolumeAttachment{})
+		Invokes(testing.NewTenantDeleteAction(volumeattachmentsResource, name, c.te), &storagev1.VolumeAttachment{})
+
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeVolumeAttachments) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewRootDeleteCollectionAction(volumeattachmentsResource, listOptions)
+
+	action := testing.NewTenantDeleteCollectionAction(volumeattachmentsResource, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &storagev1.VolumeAttachmentList{})
 	return err
@@ -123,9 +139,11 @@ func (c *FakeVolumeAttachments) DeleteCollection(options *v1.DeleteOptions, list
 // Patch applies the patch and returns the patched volumeAttachment.
 func (c *FakeVolumeAttachments) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *storagev1.VolumeAttachment, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewRootPatchSubresourceAction(volumeattachmentsResource, name, pt, data, subresources...), &storagev1.VolumeAttachment{})
+		Invokes(testing.NewTenantPatchSubresourceAction(volumeattachmentsResource, c.te, name, pt, data, subresources...), &storagev1.VolumeAttachment{})
+
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*storagev1.VolumeAttachment), err
 }

@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -134,15 +135,12 @@ func (c *Clientset) Discovery() $.DiscoveryInterface|raw$ {
 
 var newClientsetForConfigTemplate = `
 // NewForConfig creates a new Clientset for the given config.
-// If config's RateLimiter is not set and QPS and Burst are acceptable, 
-// NewForConfig will generate a rate-limiter in configShallowCopy.
 func NewForConfig(c *$.Config|raw$) (*Clientset, error) {
 	configShallowCopy := *c
-	if configShallowCopy.RateLimiter == nil && configShallowCopy.QPS > 0 {
-		if configShallowCopy.Burst <= 0 {
-			return nil, fmt.Errorf("Burst is required to be greater than 0 when RateLimiter is not set and QPS is set to greater than 0")
+	for _, configCopy := range configShallowCopy.GetAllConfigs() {
+		if configCopy.RateLimiter == nil && configCopy.QPS > 0 {
+			configCopy.RateLimiter = $.flowcontrolNewTokenBucketRateLimiter|raw$(configCopy.QPS, configCopy.Burst)
 		}
-		configShallowCopy.RateLimiter = $.flowcontrolNewTokenBucketRateLimiter|raw$(configShallowCopy.QPS, configShallowCopy.Burst)
 	}
 	var cs Clientset
 	var err error

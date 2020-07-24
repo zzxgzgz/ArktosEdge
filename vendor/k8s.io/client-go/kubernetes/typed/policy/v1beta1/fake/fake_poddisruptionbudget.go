@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakePodDisruptionBudgets struct {
 	Fake *FakePolicyV1beta1
 	ns   string
+	te   string
 }
 
 var poddisruptionbudgetsResource = schema.GroupVersionResource{Group: "policy", Version: "v1beta1", Resource: "poddisruptionbudgets"}
@@ -41,18 +43,19 @@ var poddisruptionbudgetsKind = schema.GroupVersionKind{Group: "policy", Version:
 // Get takes name of the podDisruptionBudget, and returns the corresponding podDisruptionBudget object, and an error if there is any.
 func (c *FakePodDisruptionBudgets) Get(name string, options v1.GetOptions) (result *v1beta1.PodDisruptionBudget, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(poddisruptionbudgetsResource, c.ns, name), &v1beta1.PodDisruptionBudget{})
+		Invokes(testing.NewGetActionWithMultiTenancy(poddisruptionbudgetsResource, c.ns, name, c.te), &v1beta1.PodDisruptionBudget{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.PodDisruptionBudget), err
 }
 
 // List takes label and field selectors, and returns the list of PodDisruptionBudgets that match those selectors.
 func (c *FakePodDisruptionBudgets) List(opts v1.ListOptions) (result *v1beta1.PodDisruptionBudgetList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(poddisruptionbudgetsResource, poddisruptionbudgetsKind, c.ns, opts), &v1beta1.PodDisruptionBudgetList{})
+		Invokes(testing.NewListActionWithMultiTenancy(poddisruptionbudgetsResource, poddisruptionbudgetsKind, c.ns, opts, c.te), &v1beta1.PodDisruptionBudgetList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,32 +74,37 @@ func (c *FakePodDisruptionBudgets) List(opts v1.ListOptions) (result *v1beta1.Po
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested podDisruptionBudgets.
-func (c *FakePodDisruptionBudgets) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(poddisruptionbudgetsResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested podDisruptionBudgets.
+func (c *FakePodDisruptionBudgets) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(poddisruptionbudgetsResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a podDisruptionBudget and creates it.  Returns the server's representation of the podDisruptionBudget, and an error, if there is any.
 func (c *FakePodDisruptionBudgets) Create(podDisruptionBudget *v1beta1.PodDisruptionBudget) (result *v1beta1.PodDisruptionBudget, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(poddisruptionbudgetsResource, c.ns, podDisruptionBudget), &v1beta1.PodDisruptionBudget{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(poddisruptionbudgetsResource, c.ns, podDisruptionBudget, c.te), &v1beta1.PodDisruptionBudget{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.PodDisruptionBudget), err
 }
 
 // Update takes the representation of a podDisruptionBudget and updates it. Returns the server's representation of the podDisruptionBudget, and an error, if there is any.
 func (c *FakePodDisruptionBudgets) Update(podDisruptionBudget *v1beta1.PodDisruptionBudget) (result *v1beta1.PodDisruptionBudget, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(poddisruptionbudgetsResource, c.ns, podDisruptionBudget), &v1beta1.PodDisruptionBudget{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(poddisruptionbudgetsResource, c.ns, podDisruptionBudget, c.te), &v1beta1.PodDisruptionBudget{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.PodDisruptionBudget), err
 }
 
@@ -104,7 +112,7 @@ func (c *FakePodDisruptionBudgets) Update(podDisruptionBudget *v1beta1.PodDisrup
 // Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
 func (c *FakePodDisruptionBudgets) UpdateStatus(podDisruptionBudget *v1beta1.PodDisruptionBudget) (*v1beta1.PodDisruptionBudget, error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateSubresourceAction(poddisruptionbudgetsResource, "status", c.ns, podDisruptionBudget), &v1beta1.PodDisruptionBudget{})
+		Invokes(testing.NewUpdateSubresourceActionWithMultiTenancy(poddisruptionbudgetsResource, "status", c.ns, podDisruptionBudget, c.te), &v1beta1.PodDisruptionBudget{})
 
 	if obj == nil {
 		return nil, err
@@ -115,14 +123,14 @@ func (c *FakePodDisruptionBudgets) UpdateStatus(podDisruptionBudget *v1beta1.Pod
 // Delete takes name of the podDisruptionBudget and deletes it. Returns an error if one occurs.
 func (c *FakePodDisruptionBudgets) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(poddisruptionbudgetsResource, c.ns, name), &v1beta1.PodDisruptionBudget{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(poddisruptionbudgetsResource, c.ns, name, c.te), &v1beta1.PodDisruptionBudget{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakePodDisruptionBudgets) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(poddisruptionbudgetsResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(poddisruptionbudgetsResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &v1beta1.PodDisruptionBudgetList{})
 	return err
@@ -131,10 +139,11 @@ func (c *FakePodDisruptionBudgets) DeleteCollection(options *v1.DeleteOptions, l
 // Patch applies the patch and returns the patched podDisruptionBudget.
 func (c *FakePodDisruptionBudgets) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *v1beta1.PodDisruptionBudget, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(poddisruptionbudgetsResource, c.ns, name, pt, data, subresources...), &v1beta1.PodDisruptionBudget{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(poddisruptionbudgetsResource, c.te, c.ns, name, pt, data, subresources...), &v1beta1.PodDisruptionBudget{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*v1beta1.PodDisruptionBudget), err
 }

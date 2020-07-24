@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,18 +22,18 @@ import (
 	"os"
 	"path/filepath"
 
-	"k8s.io/klog"
-	"k8s.io/utils/mount"
-	utilstrings "k8s.io/utils/strings"
-
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/fuzzer"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/volume"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/pkg/volume/util/fsquota"
+	utilstrings "k8s.io/utils/strings"
 )
 
 // TODO: in the near future, this will be changed to be more restrictive
@@ -91,6 +92,10 @@ func (plugin *emptyDirPlugin) CanSupport(spec *volume.Spec) bool {
 	return false
 }
 
+func (plugin *emptyDirPlugin) IsMigratedToCSI() bool {
+	return false
+}
+
 func (plugin *emptyDirPlugin) RequiresRemount() bool {
 	return false
 }
@@ -132,7 +137,7 @@ func (plugin *emptyDirPlugin) NewUnmounter(volName string, podUID types.UID) (vo
 
 func (plugin *emptyDirPlugin) newUnmounterInternal(volName string, podUID types.UID, mounter mount.Interface, mountDetector mountDetector) (volume.Unmounter, error) {
 	ed := &emptyDir{
-		pod:             &v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: podUID}},
+		pod:             &v1.Pod{ObjectMeta: metav1.ObjectMeta{UID: podUID, HashKey: fuzzer.GetHashOfUUID(podUID)}},
 		volName:         volName,
 		medium:          v1.StorageMediumDefault, // might be changed later
 		mounter:         mounter,

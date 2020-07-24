@@ -1,5 +1,6 @@
 /*
 Copyright 2014 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +18,6 @@ limitations under the License.
 package authorizer
 
 import (
-	"context"
 	"net/http"
 
 	"k8s.io/apiserver/pkg/authentication/user"
@@ -62,18 +62,21 @@ type Attributes interface {
 
 	// GetPath returns the path of the request
 	GetPath() string
+
+	// GetTenant returns the tenant of the requested resource
+	GetTenant() string
 }
 
 // Authorizer makes an authorization decision based on information gained by making
 // zero or more calls to methods of the Attributes interface.  It returns nil when an action is
 // authorized, otherwise it returns an error.
 type Authorizer interface {
-	Authorize(ctx context.Context, a Attributes) (authorized Decision, reason string, err error)
+	Authorize(a Attributes) (authorized Decision, reason string, err error)
 }
 
 type AuthorizerFunc func(a Attributes) (Decision, string, error)
 
-func (f AuthorizerFunc) Authorize(ctx context.Context, a Attributes) (Decision, string, error) {
+func (f AuthorizerFunc) Authorize(a Attributes) (Decision, string, error) {
 	return f(a)
 }
 
@@ -100,6 +103,7 @@ type AttributesRecord struct {
 	Name            string
 	ResourceRequest bool
 	Path            string
+	Tenant          string
 }
 
 func (a AttributesRecord) GetUser() user.Info {
@@ -144,6 +148,10 @@ func (a AttributesRecord) IsResourceRequest() bool {
 
 func (a AttributesRecord) GetPath() string {
 	return a.Path
+}
+
+func (a AttributesRecord) GetTenant() string {
+	return a.Tenant
 }
 
 type Decision int

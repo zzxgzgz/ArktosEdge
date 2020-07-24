@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,7 +30,11 @@ type FakeEventsV1beta1 struct {
 }
 
 func (c *FakeEventsV1beta1) Events(namespace string) v1beta1.EventInterface {
-	return &FakeEvents{c, namespace}
+	return &FakeEvents{c, namespace, "system"}
+}
+
+func (c *FakeEventsV1beta1) EventsWithMultiTenancy(namespace string, tenant string) v1beta1.EventInterface {
+	return &FakeEvents{c, namespace, tenant}
 }
 
 // RESTClient returns a RESTClient that is used to communicate
@@ -37,4 +42,11 @@ func (c *FakeEventsV1beta1) Events(namespace string) v1beta1.EventInterface {
 func (c *FakeEventsV1beta1) RESTClient() rest.Interface {
 	var ret *rest.RESTClient
 	return ret
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *FakeEventsV1beta1) RESTClients() []rest.Interface {
+	var ret *rest.RESTClient
+	return []rest.Interface{ret}
 }

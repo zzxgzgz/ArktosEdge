@@ -1,5 +1,6 @@
 /*
 Copyright 2016 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,24 +18,17 @@ limitations under the License.
 package v1beta1
 
 import (
-	"context"
-
 	authorizationapi "k8s.io/api/authorization/v1beta1"
 )
 
 type LocalSubjectAccessReviewExpansion interface {
 	Create(sar *authorizationapi.LocalSubjectAccessReview) (result *authorizationapi.LocalSubjectAccessReview, err error)
-	CreateContext(ctx context.Context, sar *authorizationapi.LocalSubjectAccessReview) (result *authorizationapi.LocalSubjectAccessReview, err error)
 }
 
 func (c *localSubjectAccessReviews) Create(sar *authorizationapi.LocalSubjectAccessReview) (result *authorizationapi.LocalSubjectAccessReview, err error) {
-	return c.CreateContext(context.Background(), sar)
-}
-
-func (c *localSubjectAccessReviews) CreateContext(ctx context.Context, sar *authorizationapi.LocalSubjectAccessReview) (result *authorizationapi.LocalSubjectAccessReview, err error) {
 	result = &authorizationapi.LocalSubjectAccessReview{}
 	err = c.client.Post().
-		Context(ctx).
+		Tenant(c.te).
 		Namespace(c.ns).
 		Resource("localsubjectaccessreviews").
 		Body(sar).

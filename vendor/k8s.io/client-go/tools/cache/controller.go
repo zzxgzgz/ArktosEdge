@@ -1,5 +1,6 @@
 /*
 Copyright 2015 The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +18,7 @@ limitations under the License.
 package cache
 
 import (
+	"k8s.io/klog"
 	"sync"
 	"time"
 
@@ -79,9 +81,9 @@ type controller struct {
 	clock          clock.Clock
 }
 
-// Controller is a generic controller framework.
 type Controller interface {
 	Run(stopCh <-chan struct{})
+	RunWithReset(stopCh <-chan struct{}, filterBounds []filterBound)
 	HasSynced() bool
 	LastSyncResourceVersion() string
 }
@@ -99,17 +101,38 @@ func New(c *Config) Controller {
 // It's an error to call Run more than once.
 // Run blocks; call via go.
 func (c *controller) Run(stopCh <-chan struct{}) {
+	c.RunWithReset(stopCh, nil)
+}
+
+// RunWithReset begins processing items, and will continue until a value is sent down stopCh.
+// It's an error to call Run more than once.
+// Run blocks; call via go.
+func (c *controller) RunWithReset(stopCh <-chan struct{}, filterBounds []filterBound) {
+	klog.V(4).Infof("start controller run with reset %+v. %v", filterBounds, c.config.ObjectType.GetObjectKind())
+
 	defer utilruntime.HandleCrash()
 	go func() {
 		<-stopCh
 		c.config.Queue.Close()
 	}()
-	r := NewReflector(
-		c.config.ListerWatcher,
-		c.config.ObjectType,
-		c.config.Queue,
-		c.config.FullResyncPeriod,
-	)
+
+	var r *Reflector
+	if len(filterBounds) > 0 {
+		r = NewReflectorWithReset(
+			c.config.ListerWatcher,
+			c.config.ObjectType,
+			c.config.Queue,
+			c.config.FullResyncPeriod,
+			filterBounds,
+		)
+	} else {
+		r = NewReflector(
+			c.config.ListerWatcher,
+			c.config.ObjectType,
+			c.config.Queue,
+			c.config.FullResyncPeriod,
+		)
+	}
 	r.ShouldResync = c.config.ShouldResync
 	r.clock = c.clock
 
@@ -131,8 +154,6 @@ func (c *controller) HasSynced() bool {
 }
 
 func (c *controller) LastSyncResourceVersion() string {
-	c.reflectorMutex.RLock()
-	defer c.reflectorMutex.RUnlock()
 	if c.reflector == nil {
 		return ""
 	}
@@ -152,7 +173,7 @@ func (c *controller) processLoop() {
 	for {
 		obj, err := c.config.Queue.Pop(PopProcessFunc(c.config.Process))
 		if err != nil {
-			if err == ErrFIFOClosed {
+			if err == FIFOClosedError {
 				return
 			}
 			if c.config.RetryOnError {

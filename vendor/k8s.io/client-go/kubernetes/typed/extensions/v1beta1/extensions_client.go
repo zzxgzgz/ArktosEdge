@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,13 +20,19 @@ limitations under the License.
 package v1beta1
 
 import (
+	rand "math/rand"
+	"time"
+
 	v1beta1 "k8s.io/api/extensions/v1beta1"
+	apiserverupdate "k8s.io/client-go/apiserverupdate"
 	"k8s.io/client-go/kubernetes/scheme"
 	rest "k8s.io/client-go/rest"
+	klog "k8s.io/klog"
 )
 
 type ExtensionsV1beta1Interface interface {
 	RESTClient() rest.Interface
+	RESTClients() []rest.Interface
 	DaemonSetsGetter
 	DeploymentsGetter
 	IngressesGetter
@@ -36,44 +43,82 @@ type ExtensionsV1beta1Interface interface {
 
 // ExtensionsV1beta1Client is used to interact with features provided by the extensions group.
 type ExtensionsV1beta1Client struct {
-	restClient rest.Interface
+	restClients []rest.Interface
+	configs     *rest.Config
 }
 
 func (c *ExtensionsV1beta1Client) DaemonSets(namespace string) DaemonSetInterface {
-	return newDaemonSets(c, namespace)
+	return newDaemonSetsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *ExtensionsV1beta1Client) DaemonSetsWithMultiTenancy(namespace string, tenant string) DaemonSetInterface {
+	return newDaemonSetsWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *ExtensionsV1beta1Client) Deployments(namespace string) DeploymentInterface {
-	return newDeployments(c, namespace)
+	return newDeploymentsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *ExtensionsV1beta1Client) DeploymentsWithMultiTenancy(namespace string, tenant string) DeploymentInterface {
+	return newDeploymentsWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *ExtensionsV1beta1Client) Ingresses(namespace string) IngressInterface {
-	return newIngresses(c, namespace)
+	return newIngressesWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *ExtensionsV1beta1Client) IngressesWithMultiTenancy(namespace string, tenant string) IngressInterface {
+	return newIngressesWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *ExtensionsV1beta1Client) NetworkPolicies(namespace string) NetworkPolicyInterface {
-	return newNetworkPolicies(c, namespace)
+	return newNetworkPoliciesWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *ExtensionsV1beta1Client) NetworkPoliciesWithMultiTenancy(namespace string, tenant string) NetworkPolicyInterface {
+	return newNetworkPoliciesWithMultiTenancy(c, namespace, tenant)
 }
 
 func (c *ExtensionsV1beta1Client) PodSecurityPolicies() PodSecurityPolicyInterface {
-	return newPodSecurityPolicies(c)
+	return newPodSecurityPoliciesWithMultiTenancy(c, "system")
+}
+
+func (c *ExtensionsV1beta1Client) PodSecurityPoliciesWithMultiTenancy(tenant string) PodSecurityPolicyInterface {
+	return newPodSecurityPoliciesWithMultiTenancy(c, tenant)
 }
 
 func (c *ExtensionsV1beta1Client) ReplicaSets(namespace string) ReplicaSetInterface {
-	return newReplicaSets(c, namespace)
+	return newReplicaSetsWithMultiTenancy(c, namespace, "system")
+}
+
+func (c *ExtensionsV1beta1Client) ReplicaSetsWithMultiTenancy(namespace string, tenant string) ReplicaSetInterface {
+	return newReplicaSetsWithMultiTenancy(c, namespace, tenant)
 }
 
 // NewForConfig creates a new ExtensionsV1beta1Client for the given config.
 func NewForConfig(c *rest.Config) (*ExtensionsV1beta1Client, error) {
-	config := *c
-	if err := setConfigDefaults(&config); err != nil {
+	configs := rest.CopyConfigs(c)
+	if err := setConfigDefaults(configs); err != nil {
 		return nil, err
 	}
-	client, err := rest.RESTClientFor(&config)
-	if err != nil {
-		return nil, err
+
+	clients := make([]rest.Interface, len(configs.GetAllConfigs()))
+	for i, config := range configs.GetAllConfigs() {
+		client, err := rest.RESTClientFor(config)
+		if err != nil {
+			return nil, err
+		}
+		clients[i] = client
 	}
-	return &ExtensionsV1beta1Client{client}, nil
+
+	obj := &ExtensionsV1beta1Client{
+		restClients: clients,
+		configs:     configs,
+	}
+
+	obj.run()
+
+	return obj, nil
 }
 
 // NewForConfigOrDie creates a new ExtensionsV1beta1Client for the given config and
@@ -88,17 +133,21 @@ func NewForConfigOrDie(c *rest.Config) *ExtensionsV1beta1Client {
 
 // New creates a new ExtensionsV1beta1Client for the given RESTClient.
 func New(c rest.Interface) *ExtensionsV1beta1Client {
-	return &ExtensionsV1beta1Client{c}
+	clients := []rest.Interface{c}
+	return &ExtensionsV1beta1Client{restClients: clients}
 }
 
-func setConfigDefaults(config *rest.Config) error {
+func setConfigDefaults(configs *rest.Config) error {
 	gv := v1beta1.SchemeGroupVersion
-	config.GroupVersion = &gv
-	config.APIPath = "/apis"
-	config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
 
-	if config.UserAgent == "" {
-		config.UserAgent = rest.DefaultKubernetesUserAgent()
+	for _, config := range configs.GetAllConfigs() {
+		config.GroupVersion = &gv
+		config.APIPath = "/apis"
+		config.NegotiatedSerializer = scheme.Codecs.WithoutConversion()
+
+		if config.UserAgent == "" {
+			config.UserAgent = rest.DefaultKubernetesUserAgent()
+		}
 	}
 
 	return nil
@@ -110,5 +159,50 @@ func (c *ExtensionsV1beta1Client) RESTClient() rest.Interface {
 	if c == nil {
 		return nil
 	}
-	return c.restClient
+
+	max := len(c.restClients)
+	if max == 0 {
+		return nil
+	}
+	if max == 1 {
+		return c.restClients[0]
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	ran := rand.Intn(max)
+	return c.restClients[ran]
+}
+
+// RESTClients returns all RESTClient that are used to communicate
+// with all API servers by this client implementation.
+func (c *ExtensionsV1beta1Client) RESTClients() []rest.Interface {
+	if c == nil {
+		return nil
+	}
+
+	return c.restClients
+}
+
+// run watch api server instance updates and recreate connections to new set of api servers
+func (c *ExtensionsV1beta1Client) run() {
+	go func(c *ExtensionsV1beta1Client) {
+		member := c.configs.WatchUpdate()
+		watcherForUpdateComplete := apiserverupdate.GetClientSetsWatcher()
+		watcherForUpdateComplete.AddWatcher()
+
+		for range member.Read {
+			// create new client
+			clients := make([]rest.Interface, len(c.configs.GetAllConfigs()))
+			for i, config := range c.configs.GetAllConfigs() {
+				client, err := rest.RESTClientFor(config)
+				if err != nil {
+					klog.Fatalf("Cannot create rest client for [%+v], err %v", config, err)
+					return
+				}
+				clients[i] = client
+			}
+			c.restClients = clients
+			watcherForUpdateComplete.NotifyDone()
+		}
+	}(c)
 }

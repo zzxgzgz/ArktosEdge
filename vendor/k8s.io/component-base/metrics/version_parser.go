@@ -18,11 +18,9 @@ package metrics
 
 import (
 	"fmt"
-	"regexp"
-
 	"github.com/blang/semver"
-
 	apimachineryversion "k8s.io/apimachinery/pkg/version"
+	"regexp"
 )
 
 const (
@@ -33,13 +31,6 @@ var (
 	versionRe = regexp.MustCompile(versionRegexpString)
 )
 
-func parseSemver(s string) *semver.Version {
-	if s != "" {
-		sv := semver.MustParse(s)
-		return &sv
-	}
-	return nil
-}
 func parseVersion(ver apimachineryversion.Info) semver.Version {
 	matches := versionRe.FindAllStringSubmatch(ver.String(), -1)
 

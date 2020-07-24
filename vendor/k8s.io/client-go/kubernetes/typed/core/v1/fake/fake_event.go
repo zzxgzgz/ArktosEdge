@@ -1,5 +1,6 @@
 /*
 Copyright The Kubernetes Authors.
+Copyright 2020 Authors of Arktos - file modified.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +33,7 @@ import (
 type FakeEvents struct {
 	Fake *FakeCoreV1
 	ns   string
+	te   string
 }
 
 var eventsResource = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}
@@ -41,18 +43,19 @@ var eventsKind = schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Event"
 // Get takes name of the event, and returns the corresponding event object, and an error if there is any.
 func (c *FakeEvents) Get(name string, options v1.GetOptions) (result *corev1.Event, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewGetAction(eventsResource, c.ns, name), &corev1.Event{})
+		Invokes(testing.NewGetActionWithMultiTenancy(eventsResource, c.ns, name, c.te), &corev1.Event{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Event), err
 }
 
 // List takes label and field selectors, and returns the list of Events that match those selectors.
 func (c *FakeEvents) List(opts v1.ListOptions) (result *corev1.EventList, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewListAction(eventsResource, eventsKind, c.ns, opts), &corev1.EventList{})
+		Invokes(testing.NewListActionWithMultiTenancy(eventsResource, eventsKind, c.ns, opts, c.te), &corev1.EventList{})
 
 	if obj == nil {
 		return nil, err
@@ -71,46 +74,51 @@ func (c *FakeEvents) List(opts v1.ListOptions) (result *corev1.EventList, err er
 	return list, err
 }
 
-// Watch returns a watch.Interface that watches the requested events.
-func (c *FakeEvents) Watch(opts v1.ListOptions) (watch.Interface, error) {
-	return c.Fake.
-		InvokesWatch(testing.NewWatchAction(eventsResource, c.ns, opts))
+// Watch returns a watch.AggregatedWatchInterface that watches the requested events.
+func (c *FakeEvents) Watch(opts v1.ListOptions) watch.AggregatedWatchInterface {
+	aggWatch := watch.NewAggregatedWatcher()
+	watcher, err := c.Fake.
+		InvokesWatch(testing.NewWatchActionWithMultiTenancy(eventsResource, c.ns, opts, c.te))
 
+	aggWatch.AddWatchInterface(watcher, err)
+	return aggWatch
 }
 
 // Create takes the representation of a event and creates it.  Returns the server's representation of the event, and an error, if there is any.
 func (c *FakeEvents) Create(event *corev1.Event) (result *corev1.Event, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewCreateAction(eventsResource, c.ns, event), &corev1.Event{})
+		Invokes(testing.NewCreateActionWithMultiTenancy(eventsResource, c.ns, event, c.te), &corev1.Event{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Event), err
 }
 
 // Update takes the representation of a event and updates it. Returns the server's representation of the event, and an error, if there is any.
 func (c *FakeEvents) Update(event *corev1.Event) (result *corev1.Event, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewUpdateAction(eventsResource, c.ns, event), &corev1.Event{})
+		Invokes(testing.NewUpdateActionWithMultiTenancy(eventsResource, c.ns, event, c.te), &corev1.Event{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Event), err
 }
 
 // Delete takes name of the event and deletes it. Returns an error if one occurs.
 func (c *FakeEvents) Delete(name string, options *v1.DeleteOptions) error {
 	_, err := c.Fake.
-		Invokes(testing.NewDeleteAction(eventsResource, c.ns, name), &corev1.Event{})
+		Invokes(testing.NewDeleteActionWithMultiTenancy(eventsResource, c.ns, name, c.te), &corev1.Event{})
 
 	return err
 }
 
 // DeleteCollection deletes a collection of objects.
 func (c *FakeEvents) DeleteCollection(options *v1.DeleteOptions, listOptions v1.ListOptions) error {
-	action := testing.NewDeleteCollectionAction(eventsResource, c.ns, listOptions)
+	action := testing.NewDeleteCollectionActionWithMultiTenancy(eventsResource, c.ns, listOptions, c.te)
 
 	_, err := c.Fake.Invokes(action, &corev1.EventList{})
 	return err
@@ -119,10 +127,11 @@ func (c *FakeEvents) DeleteCollection(options *v1.DeleteOptions, listOptions v1.
 // Patch applies the patch and returns the patched event.
 func (c *FakeEvents) Patch(name string, pt types.PatchType, data []byte, subresources ...string) (result *corev1.Event, err error) {
 	obj, err := c.Fake.
-		Invokes(testing.NewPatchSubresourceAction(eventsResource, c.ns, name, pt, data, subresources...), &corev1.Event{})
+		Invokes(testing.NewPatchSubresourceActionWithMultiTenancy(eventsResource, c.te, c.ns, name, pt, data, subresources...), &corev1.Event{})
 
 	if obj == nil {
 		return nil, err
 	}
+
 	return obj.(*corev1.Event), err
 }
